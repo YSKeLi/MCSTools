@@ -16,6 +16,8 @@ mac:
   target: dmg
 linux:
   target: AppImage
+  category: Utility
+  maintainer: "YSKeLi <110509979+YSKeLi@users.noreply.github.com>"
 msi:
   oneClick: false
   upgradeCode: "{4E2895A3-0FE8-4A63-B648-C6613D7C4D79}"

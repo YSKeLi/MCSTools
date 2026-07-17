@@ -15,10 +15,7 @@ win:
 mac:
   target: dmg
 linux:
-  target:
-    - AppImage
-    - deb
-    - rpm
+  target: AppImage
 msi:
   oneClick: false
   upgradeCode: "{4E2895A3-0FE8-4A63-B648-C6613D7C4D79}"

@@ -1,0 +1,167 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]' || startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            suffix: Windows-x64
+            target: win
+          - os: windows-latest
+            arch: arm64
+            suffix: Windows-arm64
+            target: win
+          - os: macos-latest
+            arch: x64
+            suffix: macOS-x64
+            target: mac
+          - os: macos-latest
+            arch: arm64
+            suffix: macOS-arm64
+            target: mac
+          - os: ubuntu-latest
+            arch: x64
+            suffix: Linux-x64
+            target: linux
+          - os: ubuntu-latest
+            arch: arm64
+            suffix: Linux-arm64
+            target: linux
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -o Acquire::AllowInsecureRepositories=true 2>/dev/null || true
+          sudo apt-get install -y libx11-xcb1 libxtst6 libxrandr2 libasound2t64 libnss3 libgtk-3-0 xvfb
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Build installer
+        run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish=never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build portable zip
+        run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --dir --publish=never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release/dist | Out-Null
+
+          Get-ChildItem release -File | Where-Object {
+            $_.Extension -in '.exe', '.dmg', '.AppImage'
+          } | ForEach-Object {
+            $newname = "MCServerTools-${{ matrix.suffix }}$($_.Extension)"
+            Copy-Item $_.FullName "release/dist/$newname"
+          }
+
+          $appdir = Get-ChildItem release -Directory | Where-Object {
+            -not $_.Name.StartsWith('.') -and $_.Name -ne 'dist'
+          } | Select-Object -First 1
+
+          if ($appdir) {
+            Compress-Archive -Path "$($appdir.FullName)/*" -DestinationPath "release/dist/MCServerTools-${{ matrix.suffix }}.zip" -Force
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MCServerTools-${{ matrix.suffix }}
+          path: release/dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          body: |
+            ## v1.0.3 更新内容
+
+            - 新增设置页面与检查更新功能
+            - 重构服务端核心下载页以及逻辑
+            - 重构服务端核心列表来源
+            - 补充更多核心类型的自动识别支持
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update latest.json on master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > release.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          release = json.loads(Path("release.json").read_text(encoding="utf-8"))
+          latest = {
+              "repo": "aaatri/MCServerTools",
+              "source": "github-release",
+              "version": "1.0.3",
+              "tag": "v1.0.3",
+              "title": "v1.0.3",
+              "publishedAt": release.get("published_at"),
+              "url": release.get("html_url"),
+              "assets": [
+                  {
+                      "name": asset["name"],
+                      "url": asset["browser_download_url"],
+                      "size": asset.get("size"),
+                  }
+                  for asset in release.get("assets", [])
+              ],
+              "assetsCount": len(release.get("assets", [])),
+              "notes": [
+                  "v1.0.3 更新内容",
+                  "新增设置页面与检查更新功能",
+                  "重构服务端核心下载页以及逻辑",
+                  "重构服务端核心列表来源",
+                  "补充更多核心类型的自动识别支持",
+              ],
+          }
+          Path("latest.json").write_text(json.dumps(latest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
+          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout master
+          cp ../latest.json public/latest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/latest.json
+          git commit -m "chore: update latest.json for ${GITHUB_REF_NAME}" || exit 0
+          git push origin master

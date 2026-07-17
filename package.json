@@ -1,0 +1,33 @@
+{
+  "name": "minecraft-server-tools",
+  "version": "1.0.3",
+  "description": "跨平台 Minecraft 服务器搭建工具",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "npm run build:main && concurrently -k \"tsc -p tsconfig.main.json --watch --preserveWatchOutput\" \"vite\" \"wait-on tcp:5173 && electron dist/main/index.js\"",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "dist": "npm run build && electron-builder",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@mui/material": "^5.16.7",
+    "@emotion/react": "^11.13.3",
+    "@emotion/styled": "^11.13.0",
+    "@mui/icons-material": "^5.16.7"
+  },
+  "devDependencies": {
+    "electron": "^31.6.0",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.8",
+    "@vitejs/plugin-react": "^4.3.2",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^8.2.2",
+    "wait-on": "^8.0.1"
+  }
+}

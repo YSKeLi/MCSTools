@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "minecraft-server-tools",
   "version": "1.0.3",
   "description": "Cross-platform Minecraft server toolkit.",
@@ -7,6 +7,10 @@
     "email": "110509979+YSKeLi@users.noreply.github.com"
   },
   "homepage": "https://github.com/YSKeLi/MCSTools",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YSKeLi/MCSTools.git"
+  },
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"tsc -p tsconfig.main.json --watch --preserveWatchOutput\" \"vite\" \"wait-on tcp:5173 && electron dist/main/index.js\"",

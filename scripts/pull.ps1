@@ -1,5 +1,5 @@
-param(
-  [string]$Branch = "master"
+﻿param(
+  [string]$Branch = "main"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,5 +25,5 @@ git pull origin $Branch
 if ($?) {
   Write-Host "拉取成功!" -ForegroundColor Green
 } else {
-  Write-Host "拉取失败，请检查网络" -ForegroundColor Red
+  Write-Host "拉取失败，请检查网络连接" -ForegroundColor Red
 }

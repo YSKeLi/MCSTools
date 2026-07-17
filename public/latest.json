@@ -1,79 +1,90 @@
 {
-  "repo": "aaatri/MCServerTools",
+  "repo": "YSKeLi/MCSTools",
   "source": "github-release",
   "version": "1.0.3",
   "tag": "v1.0.3",
   "title": "v1.0.3",
-  "publishedAt": "2026-07-13T09:13:35Z",
-  "url": "https://github.com/aaatri/MCServerTools/releases/tag/v1.0.3",
+  "publishedAt": null,
+  "url": "https://github.com/YSKeLi/MCSTools/releases/tag/v1.0.3",
   "assets": [
     {
       "name": "MCServerTools-Linux-arm64.AppImage",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.AppImage",
-      "size": 118286686
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.AppImage"
+    },
+    {
+      "name": "MCServerTools-Linux-arm64.deb",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.deb"
+    },
+    {
+      "name": "MCServerTools-Linux-arm64.rpm",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.rpm"
     },
     {
       "name": "MCServerTools-Linux-arm64.zip",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.zip",
-      "size": 118768089
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.zip"
     },
     {
       "name": "MCServerTools-Linux-x64.AppImage",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Linux-x64.AppImage",
-      "size": 117965765
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.AppImage"
+    },
+    {
+      "name": "MCServerTools-Linux-x64.deb",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.deb"
+    },
+    {
+      "name": "MCServerTools-Linux-x64.rpm",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.rpm"
     },
     {
       "name": "MCServerTools-Linux-x64.zip",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Linux-x64.zip",
-      "size": 117607718
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.zip"
     },
     {
       "name": "MCServerTools-macOS-arm64.dmg",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-macOS-arm64.dmg",
-      "size": 108079730
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-arm64.dmg"
     },
     {
       "name": "MCServerTools-macOS-arm64.zip",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-macOS-arm64.zip",
-      "size": 174708488
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-arm64.zip"
     },
     {
       "name": "MCServerTools-macOS-x64.dmg",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-macOS-x64.dmg",
-      "size": 114105086
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-x64.dmg"
     },
     {
       "name": "MCServerTools-macOS-x64.zip",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-macOS-x64.zip",
-      "size": 189798195
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-x64.zip"
     },
     {
       "name": "MCServerTools-Windows-arm64.exe",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.exe",
-      "size": 89185331
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.exe"
+    },
+    {
+      "name": "MCServerTools-Windows-arm64.msi",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.msi"
     },
     {
       "name": "MCServerTools-Windows-arm64.zip",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.zip",
-      "size": 126510941
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.zip"
     },
     {
       "name": "MCServerTools-Windows-x64.exe",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Windows-x64.exe",
-      "size": 85211385
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-x64.exe"
+    },
+    {
+      "name": "MCServerTools-Windows-x64.msi",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-x64.msi"
     },
     {
       "name": "MCServerTools-Windows-x64.zip",
-      "url": "https://github.com/aaatri/MCServerTools/releases/download/v1.0.3/MCServerTools-Windows-x64.zip",
-      "size": 123851328
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-x64.zip"
     }
   ],
-  "assetsCount": 12,
+  "assetsCount": 18,
   "notes": [
-    "v1.0.3 更新内容",
-    "新增设置页面与检查更新功能",
-    "重构服务端核心下载页以及逻辑",
-    "重构服务端核心列表来源",
-    "补充更多核心类型的自动识别支持"
+    "\u65b0\u589e\u8bbe\u7f6e\u9875\u9762\u4e0e\u68c0\u67e5\u66f4\u65b0\u529f\u80fd",
+    "\u91cd\u6784\u670d\u52a1\u7aef\u6838\u5fc3\u4e0b\u8f7d\u9875\u4ee5\u53ca\u903b\u8f91",
+    "\u91cd\u6784\u670d\u52a1\u7aef\u6838\u5fc3\u5217\u8868\u6765\u6e90",
+    "\u8865\u5145\u66f4\u591a\u6838\u5fc3\u7c7b\u578b\u7684\u81ea\u52a8\u8bc6\u522b\u652f\u6301"
   ]
 }

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - main
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -75,7 +75,7 @@ jobs:
           New-Item -ItemType Directory -Force release/dist | Out-Null
 
           Get-ChildItem release -File | Where-Object {
-            $_.Extension -in '.exe', '.dmg', '.AppImage'
+            $_.Extension -in '.exe', '.msi', '.dmg', '.AppImage', '.deb', '.rpm'
           } | ForEach-Object {
             $newname = "MCServerTools-${{ matrix.suffix }}$($_.Extension)"
             Copy-Item $_.FullName "release/dist/$newname"
@@ -103,21 +103,32 @@ jobs:
         with:
           path: artifacts
 
+      - name: Prepare release metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          notes = [
+              "\u65b0\u589e\u8bbe\u7f6e\u9875\u9762\u4e0e\u68c0\u67e5\u66f4\u65b0\u529f\u80fd",
+              "\u91cd\u6784\u670d\u52a1\u7aef\u6838\u5fc3\u4e0b\u8f7d\u9875\u4ee5\u53ca\u903b\u8f91",
+              "\u91cd\u6784\u670d\u52a1\u7aef\u6838\u5fc3\u5217\u8868\u6765\u6e90",
+              "\u8865\u5145\u66f4\u591a\u6838\u5fc3\u7c7b\u578b\u7684\u81ea\u52a8\u8bc6\u522b\u652f\u6301",
+          ]
+          body = "## v1.0.3 \u66f4\u65b0\u5185\u5bb9\n\n" + "\n".join(f"- {note}" for note in notes)
+          Path("release-body.md").write_text(body + "\n", encoding="utf-8")
+          Path("release-notes.json").write_text(json.dumps(notes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          body: |
-            ## v1.0.3 更新内容
-
-            - 新增设置页面与检查更新功能
-            - 重构服务端核心下载页以及逻辑
-            - 重构服务端核心列表来源
-            - 补充更多核心类型的自动识别支持
+          body_path: release-body.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update latest.json on master
+      - name: Update latest.json on main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -125,15 +136,19 @@ jobs:
 
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag[1:] if tag.startswith("v") else tag
           release = json.loads(Path("release.json").read_text(encoding="utf-8"))
+          notes = json.loads(Path("release-notes.json").read_text(encoding="utf-8"))
           latest = {
-              "repo": "aaatri/MCServerTools",
+              "repo": os.environ["GITHUB_REPOSITORY"],
               "source": "github-release",
-              "version": "1.0.3",
-              "tag": "v1.0.3",
-              "title": "v1.0.3",
+              "version": version,
+              "tag": tag,
+              "title": tag,
               "publishedAt": release.get("published_at"),
               "url": release.get("html_url"),
               "assets": [
@@ -145,23 +160,17 @@ jobs:
                   for asset in release.get("assets", [])
               ],
               "assetsCount": len(release.get("assets", [])),
-              "notes": [
-                  "v1.0.3 更新内容",
-                  "新增设置页面与检查更新功能",
-                  "重构服务端核心下载页以及逻辑",
-                  "重构服务端核心列表来源",
-                  "补充更多核心类型的自动识别支持",
-              ],
+              "notes": notes,
           }
           Path("latest.json").write_text(json.dumps(latest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
 
           git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
           cd repo
-          git checkout master
+          git checkout main
           cp ../latest.json public/latest.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/latest.json
           git commit -m "chore: update latest.json for ${GITHUB_REF_NAME}" || exit 0
-          git push origin master
+          git push origin main

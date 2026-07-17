@@ -35,8 +35,8 @@ interface LatestReleaseInfo {
 }
 
 const UPDATE_INFO_URLS = [
-  'https://raw.githubusercontent.com/aaatri/MCServerTools/master/public/latest.json',
-  'https://cdn.jsdelivr.net/gh/aaatri/MCServerTools@master/public/latest.json',
+  'https://raw.githubusercontent.com/YSKeLi/MCSTools/main/public/latest.json',
+  'https://cdn.jsdelivr.net/gh/YSKeLi/MCSTools@main/public/latest.json',
 ]
 
 function getProjectVersion(): string {
@@ -134,10 +134,10 @@ function getPreferredUpdateAsset(latestInfo: LatestReleaseInfo): ReleaseAssetInf
   const archKey = process.arch === 'arm64' ? 'arm64' : 'x64'
   const suffix = `${platformKey}-${archKey}`
   const preferredExtensions = process.platform === 'win32'
-    ? ['.exe', '.zip']
+    ? ['.exe', '.msi', '.zip']
     : process.platform === 'darwin'
       ? ['.dmg', '.zip']
-      : ['.AppImage', '.zip']
+      : ['.AppImage', '.deb', '.rpm', '.zip']
 
   for (const extension of preferredExtensions) {
     const exact = assets.find(asset => asset.name === `MCServerTools-${suffix}${extension}`)

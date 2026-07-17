@@ -13,12 +13,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aaatri/MCServerTools/releases"><img src="https://img.shields.io/github/v/release/aaatri/MCServerTools?color=brightgreen&label=version" alt="Version"></a>
-  <a href="https://github.com/aaatri/MCServerTools"><img src="https://img.shields.io/badge/language-React%20%7C%20Electron-blueviolet" alt="Language"></a>
-  <a href="https://github.com/aaatri/MCServerTools"><img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platform"></a>
-  <a href="https://github.com/aaatri/MCServerTools/issues"><img src="https://img.shields.io/github/issues/aaatri/MCServerTools?color=orange" alt="Issues"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/aaatri/MCServerTools?color=yellow" alt="License"></a>
-  <a href="https://github.com/aaatri/MCServerTools"><img src="https://img.shields.io/github/stars/aaatri/MCServerTools?style=social" alt="Stars"></a>
+  <a href="https://github.com/YSKeLi/MCSTools/releases"><img src="https://img.shields.io/github/v/release/YSKeLi/MCSTools?color=brightgreen&label=version" alt="Version"></a>
+  <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/badge/language-React%20%7C%20Electron-blueviolet" alt="Language"></a>
+  <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platform"></a>
+  <a href="https://github.com/YSKeLi/MCSTools/issues"><img src="https://img.shields.io/github/issues/YSKeLi/MCSTools?color=orange" alt="Issues"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/YSKeLi/MCSTools?color=yellow" alt="License"></a>
+  <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/github/stars/YSKeLi/MCSTools?style=social" alt="Stars"></a>
 </p>
 
 > **注意：** 目前 MCServerTools 处于开发完善阶段，可能存在部分 BUG，欢迎通过 Issues 提交反馈。
@@ -62,7 +62,7 @@
 获取源码并启动开发环境：
 
 ```bash
-git clone https://github.com/aaatri/MCServerTools.git
+git clone https://github.com/YSKeLi/MCSTools.git
 cd MCServerTools
 npm install
 npm run dev
@@ -172,8 +172,8 @@ MCServerTools/
 
 如果在安装或使用过程中遇到任何问题，或者有新的功能建议，欢迎随时交流：
 
-- **提交 Issue**：[GitHub Issues 页面](https://github.com/aaatri/MCServerTools/issues)
-- **获取最新版本**：[GitHub Releases 页面](https://github.com/aaatri/MCServerTools/releases)
+- **提交 Issue**：[GitHub Issues 页面](https://github.com/YSKeLi/MCSTools/issues)
+- **获取最新版本**：[GitHub Releases 页面](https://github.com/YSKeLi/MCSTools/releases)
 
 ---
 

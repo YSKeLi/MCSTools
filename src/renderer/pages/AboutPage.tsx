@@ -32,12 +32,12 @@ export function AboutPage() {
         制作者：<strong>小亚</strong>
       </Typography>
       <Link
-        href="https://github.com/aaatri/MCServerTools"
+        href="https://github.com/YSKeLi/MCSTools"
         target="_blank"
         rel="noopener noreferrer"
         sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
       >
-        <GitHub fontSize="small" /> MCServerTools
+        <GitHub fontSize="small" /> YSKeLi/MCSTools
       </Link>
     </Box>
   )

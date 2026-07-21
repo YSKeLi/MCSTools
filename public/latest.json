@@ -1,114 +1,120 @@
 {
   "repo": "YSKeLi/MCSTools",
   "source": "github-release",
-  "version": "1.0.3",
-  "tag": "v1.0.3",
-  "title": "v1.0.3",
-  "publishedAt": "2026-07-17T13:52:19Z",
-  "url": "https://github.com/YSKeLi/MCSTools/releases/tag/v1.0.3",
+  "version": "1.0.4",
+  "tag": "v1.0.4",
+  "title": "v1.0.4",
+  "publishedAt": "2026-07-21T18:43:51Z",
+  "url": "https://github.com/YSKeLi/MCSTools/releases/tag/v1.0.4",
   "assets": [
     {
       "name": "MCServerTools-Linux-arm64.AppImage",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.AppImage",
-      "size": 118282715,
-      "sha256": "9d78aa489030f4e0ce74b8c1efed757facbd838b94f0d695ecbd50494361d9d2"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Linux-arm64.AppImage",
+      "size": 118873082,
+      "sha256": "a76217bb42f78cf993d93140ccdbe2e5b1b59f556253aa4e55c8ee40a9b43bfe"
     },
     {
       "name": "MCServerTools-Linux-arm64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-arm64.zip",
-      "size": 118768430,
-      "sha256": "b1d103520e6eb4773971f1a6968e65bcfd5c54595055e42d49fb38e417816984"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Linux-arm64.zip",
+      "size": 119345111,
+      "sha256": "290d7ed5716067fb8f7b585ffac3daa57cce546f0f7e35fc463b072d14cadc4f"
     },
     {
       "name": "MCServerTools-Linux-x64.AppImage",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.AppImage",
-      "size": 117961810,
-      "sha256": "d16c652c1938804540af7fbb22bec5901ee9eaef7c6122d28e4336cdf9decb6d"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Linux-x64.AppImage",
+      "size": 118552224,
+      "sha256": "6f08fe8536bc41ebcb9bfb0f827e450e036c9b11caaa362706b7b410ce79ea4e"
     },
     {
       "name": "MCServerTools-Linux-x64.deb",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.deb",
-      "size": 80694032,
-      "sha256": "01115d0a80d5a01ae107bfe60334b692e4eeab66998d249fc377cb4e836f4fb9"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Linux-x64.deb",
+      "size": 81127736,
+      "sha256": "a9f7e682ff9a558db6d149eadb9c159651646fb674de8b3ec8b40bc82a4edbc5"
     },
     {
       "name": "MCServerTools-Linux-x64.rpm",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.rpm",
-      "size": 80213189,
-      "sha256": "bfb4e7a72c52acba404a0a9d59cec2018ba2d2ffddbe92a9ae6fb1195c277019"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Linux-x64.rpm",
+      "size": 80610777,
+      "sha256": "3d3e32b42836d72ebdf3f1f585e4cc1be1159f199e47b586b9121d9182bff691"
     },
     {
       "name": "MCServerTools-Linux-x64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Linux-x64.zip",
-      "size": 117608059,
-      "sha256": "105fe6595964ad40fedaedcbafa947b88429ea39f0e2fddb5e8d47089dced219"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Linux-x64.zip",
+      "size": 118184740,
+      "sha256": "71de392164a3aeb3ba103e9fc64495d8046655fdfbd9604afabb12604a6c507b"
     },
     {
       "name": "MCServerTools-macOS-arm64.dmg",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-arm64.dmg",
-      "size": 108063779,
-      "sha256": "887a4c568e33e1f12f778b644d1883a9259db78bbdc3b1da5dae8201a7bcb61d"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-macOS-arm64.dmg",
+      "size": 108627013,
+      "sha256": "162e9e743ae4a3353f0dbba503ec58c06abbba19a07870cad125fe4ae3fed5f5"
     },
     {
       "name": "MCServerTools-macOS-arm64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-arm64.zip",
-      "size": 174708824,
-      "sha256": "85a2215ebd6e7f71862c1fa1fe949fc0253fc42c403ef17951c7857d54415260"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-macOS-arm64.zip",
+      "size": 175264916,
+      "sha256": "38bd4f1bf92091ac280fc6d26f2e0abfa57abf191ef97c6183155d1bc5d84905"
     },
     {
       "name": "MCServerTools-macOS-x64.dmg",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-x64.dmg",
-      "size": 114102236,
-      "sha256": "c470cff8200b4d82448038115078422a890a907a16302ed8a92488dba2e55038"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-macOS-x64.dmg",
+      "size": 114704366,
+      "sha256": "d01a63c6036480481cace5670a60c9c7ce3eae356290f6a1944a6aa49521aa2c"
     },
     {
       "name": "MCServerTools-macOS-x64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-macOS-x64.zip",
-      "size": 189798531,
-      "sha256": "2cedd880ad656919e70b820bb59027ba4de82466540d68a68184da4d08587d95"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-macOS-x64.zip",
+      "size": 190359772,
+      "sha256": "ad379846b4f709abf633fd7fb807fa2cba3efb62944cf8140edc9bf09047ec91"
     },
     {
       "name": "MCServerTools-Windows-arm64.exe",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.exe",
-      "size": 89185638,
-      "sha256": "fc6b12a85d9f4783175950b43a3cb899f553c2a2ca0ee487ed0ee65d8ac409db"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Windows-arm64.exe",
+      "size": 89507164,
+      "sha256": "555e5de2535c265f3650c86b2fb0052c86d23658a1a1c934309f34ac1bc7814c"
     },
     {
       "name": "MCServerTools-Windows-arm64.msi",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.msi",
-      "size": 94220288,
-      "sha256": "ff2f4d2c0e556ce00fe9a33a66b99f1d0fcb1721e75ebee94b8224e938f1887e"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Windows-arm64.msi",
+      "size": 94547968,
+      "sha256": "ee08d4fa0fdfd9dad4c1b3955c6008448acaf4d5214834ca9dfae4061611c859"
     },
     {
       "name": "MCServerTools-Windows-arm64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-arm64.zip",
-      "size": 126511296,
-      "sha256": "b4fc411a5ceb5730cdd6066e1b7dc02a67ad36dae5831579f564e89088b555a5"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Windows-arm64.zip",
+      "size": 126908316,
+      "sha256": "2c45392c6961fefbde87a01b526dda51b2e3dfd09cb49679e69728eced45ac09"
     },
     {
       "name": "MCServerTools-Windows-x64.exe",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-x64.exe",
-      "size": 85211675,
-      "sha256": "8cf8288a8a2e1b501990db97e5413a58c0515ec20a092457982dc7bdb871aba1"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Windows-x64.exe",
+      "size": 85533186,
+      "sha256": "48013b4aa05067ee54efc43d616c375b72412bcc46046b596463ddae3360b482"
     },
     {
       "name": "MCServerTools-Windows-x64.msi",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-x64.msi",
-      "size": 95793152,
-      "sha256": "c869ca9935d16095421e8ec82aaee725d5b26c0c5f816791a355d8c5bafd5db9"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Windows-x64.msi",
+      "size": 96088064,
+      "sha256": "2f3f80f50e44e10d93812c2edb0f96356c64c0abd3ccbccf5d69c1488ba0e74a"
     },
     {
       "name": "MCServerTools-Windows-x64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.3/MCServerTools-Windows-x64.zip",
-      "size": 123851677,
-      "sha256": "1d2ea876c7fe3057798f37917c2e170c2cfddb619d8e403d0e0a8e9f9b742148"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.4/MCServerTools-Windows-x64.zip",
+      "size": 124248699,
+      "sha256": "2ed2eb69684e8e5812f9482105c8fcdbc6655902d711fd35e6b2eee38334d6ba"
     }
   ],
   "assetsCount": 16,
   "notes": [
-    "新增设置页面与检查更新功能",
-    "重构服务端核心下载页以及逻辑",
-    "重构服务端核心列表来源",
-    "补充更多核心类型的自动识别支持"
+    "新增云服务器管理",
+    "新增本地设备信息监控",
+    "新增 Java 管理与 Java 21 下载",
+    "支持自动匹配系统和安装包",
+    "支持为服务器单独配置 Java",
+    "重构 FRP 配置导入与切换",
+    "优化 FRP 下载和启动流程",
+    "完善软件检查更新与自动安装",
+    "优化文件下载稳定性",
+    "修复服务器启动和进程控制问题"
   ]
 }

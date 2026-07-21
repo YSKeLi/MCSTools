@@ -5,8 +5,9 @@ import {
   FormControlLabel, Grid, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material'
 import { PlayArrow, Stop, Send, Delete, Add, PowerSettingsNew } from '@mui/icons-material'
+import { LocalSystemMetrics } from '../components/LocalSystemMetrics'
 import { PROP_MAP, parseProperties, serializeProperties } from '../propertiesMapping'
-import { parseServerProfile, SERVER_PROFILE_FILE } from '../serverProfile'
+import { parseServerProfile } from '../serverProfile'
 import type { PropField } from '../propertiesMapping'
 
 function PropFieldWidget({ key: propKey, value, field, onChange }: {
@@ -54,8 +55,8 @@ function joinPath(...parts: string[]) {
 }
 
 export function ServerPage({ active }: { active: boolean }) {
-  const [status, setStatus] = useState('stopped')
-  const [logs, setLogs] = useState<string[]>([])
+  const [runtimeState, setRuntimeState] = useState<ServerRuntimeState>({ serverId: null, status: 'stopped' })
+  const [logsByServer, setLogsByServer] = useState<Record<string, string[]>>({})
   const [cmd, setCmd] = useState('')
   const [tab, setTab] = useState(0)
   const [maxRam, setMaxRam] = useState(2048)
@@ -77,15 +78,26 @@ export function ServerPage({ active }: { active: boolean }) {
   const [addVersion, setAddVersion] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [javaError, setJavaError] = useState('')
   const refreshTimerRef = useRef<number | null>(null)
 
   const current = servers.find(s => s.id === currentId)
+  const status = runtimeState.serverId === currentId ? runtimeState.status : 'stopped'
+  const logs = currentId ? logsByServer[currentId] || [] : []
 
   useEffect(() => {
     if (!window.electronAPI?.onServerLog) return
-    const unsubLog = window.electronAPI.onServerLog(line => setLogs(prev => [...prev.slice(-500), line]))
-    const unsubStatus = window.electronAPI.onServerStatus(s => setStatus(s))
+    const unsubLog = window.electronAPI.onServerLog(event => {
+      if (!event.serverId) return
+      const serverId = event.serverId
+      setLogsByServer(previous => ({
+        ...previous,
+        [serverId]: [...(previous[serverId] || []).slice(-500), event.line],
+      }))
+    })
+    const unsubStatus = window.electronAPI.onServerStatus(setRuntimeState)
     const unsubServersChanged = window.electronAPI.onServersChanged(() => { loadServers() })
+    void window.electronAPI.getServerStatus().then(setRuntimeState)
     loadServers()
     return () => { unsubLog(); unsubStatus(); unsubServersChanged() }
   }, [])
@@ -117,10 +129,9 @@ export function ServerPage({ active }: { active: boolean }) {
 
   const loadProperties = useCallback(async () => {
     if (!current) return
-    const p = joinPath(current.path, 'server.properties')
-    setPropsPath(p)
+    setPropsPath(joinPath(current.path, 'server.properties'))
     try {
-      const text = await window.electronAPI.readFile(p)
+      const text = await window.electronAPI.readServerProperties(current.id)
       setPropsText(text)
       setPropsMap(parseProperties(text))
     } catch {
@@ -163,28 +174,38 @@ export function ServerPage({ active }: { active: boolean }) {
   async function handleSaveProperties() {
     if (!propsPath) return
     const text = serializeProperties(propsMap, propsText)
-    await window.electronAPI.writeFile(propsPath, text)
+    if (!current) return
+    await window.electronAPI.writeServerProperties(current.id, text)
     setPropsText(text)
   }
 
   const handleStart = useCallback(async () => {
     if (!current) return
-    const java = await window.electronAPI.detectJava()
-    await window.electronAPI.startServer(current.path, current.jarName, maxRam, java?.path)
+    setJavaError('')
+    try {
+      await window.electronAPI.startServer(current.id, maxRam)
+    } catch (error: any) {
+      setJavaError(error?.message || '服务器启动失败')
+    }
   }, [current, maxRam])
 
-  const handleStop = useCallback(async () => { await window.electronAPI.stopServer() }, [])
+  const handleStop = useCallback(async () => {
+    if (current) await window.electronAPI.stopServer(current.id)
+  }, [current])
   const handleForceStop = useCallback(async () => {
-    await window.electronAPI.sendServerCommand('stop')
-    setTimeout(async () => { await window.electronAPI.stopServer() }, 2000)
-  }, [])
+    if (current) await window.electronAPI.forceStopServer(current.id)
+  }, [current])
 
   const handleCommand = useCallback(async () => {
     if (!cmd.trim()) return
-    await window.electronAPI.sendServerCommand(cmd.trim())
-    setLogs(prev => [...prev, `> ${cmd}`])
+    if (!current) return
+    await window.electronAPI.sendServerCommand(current.id, cmd.trim())
+    setLogsByServer(previous => ({
+      ...previous,
+      [current.id]: [...(previous[current.id] || []).slice(-500), `> ${cmd}`],
+    }))
     setCmd('')
-  }, [cmd])
+  }, [cmd, current])
 
   const handleDeleteOpen = useCallback(() => {
     if (!current) return
@@ -204,6 +225,22 @@ export function ServerPage({ active }: { active: boolean }) {
     }
   }, [current])
 
+  const handleSelectJava = useCallback(async () => {
+    if (!current) return
+    const selectedPath = await window.electronAPI.selectJavaExecutable()
+    if (!selectedPath) return
+    setJavaError('')
+    await window.electronAPI.serversUpdate(current.id, { javaPath: selectedPath })
+    await loadServers()
+  }, [current])
+
+  const handleClearJava = useCallback(async () => {
+    if (!current) return
+    setJavaError('')
+    await window.electronAPI.serversUpdate(current.id, { javaPath: undefined })
+    await loadServers()
+  }, [current])
+
   const handleAddOpen = async () => {
     setAddDir(''); setAddName(''); setAddJar('server.jar'); setAddCoreId('unknown'); setAddCoreName('unknown'); setAddVersion('')
     setAddOpen(true)
@@ -215,7 +252,7 @@ export function ServerPage({ active }: { active: boolean }) {
     setAddDir(dir)
 
     try {
-      const profileText = await window.electronAPI.readFile(joinPath(dir, SERVER_PROFILE_FILE))
+      const profileText = await window.electronAPI.readServerProfile(dir)
       const profile = parseServerProfile(profileText)
       if (profile.serverName) setAddName(profile.serverName)
       if (profile.coreType) setAddCoreId(profile.coreType)
@@ -238,15 +275,14 @@ export function ServerPage({ active }: { active: boolean }) {
   const handleAddConfirm = async () => {
     if (!addDir || !addName.trim()) return
     await window.electronAPI.serversAdd({
-      id: `${Date.now()}`,
       name: addName.trim(),
       path: addDir,
       coreId: addCoreId,
       coreName: addCoreName,
       version: addVersion || '未知',
       jarName: addJar,
-      createdAt: new Date().toISOString(),
       maxRam: 2048,
+      managedPath: false,
     })
     setAddOpen(false)
     loadServers()
@@ -258,7 +294,9 @@ export function ServerPage({ active }: { active: boolean }) {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={700} gutterBottom>服务器管理</Typography>
+      <Typography variant="h4" fontWeight={700} gutterBottom>本地服务器管理</Typography>
+
+      <LocalSystemMetrics active={active} />
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -278,7 +316,15 @@ export function ServerPage({ active }: { active: boolean }) {
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>内存: {maxRam} MB</Typography>
-                <Slider value={maxRam} onChange={(_, v) => setMaxRam(v as number)} min={512} max={16384} step={256} sx={{ width: 120 }} />
+                <Slider
+                  value={maxRam}
+                  onChange={(_, value) => setMaxRam(value as number)}
+                  onChangeCommitted={(_, value) => current && void window.electronAPI.serversUpdate(current.id, { maxRam: value as number })}
+                  min={512}
+                  max={16384}
+                  step={256}
+                  sx={{ width: 120 }}
+                />
               </Box>
               <Chip label={`状态: ${status}`} size="small" color={statusColor[status as keyof typeof statusColor] || 'default'} />
               {status === 'running' ? (
@@ -297,6 +343,18 @@ export function ServerPage({ active }: { active: boolean }) {
             </>
           )}
         </Box>
+        {current && (
+          <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Typography variant="body2" color="text.secondary">
+                Java: {current.javaPath || '自动检测'}
+              </Typography>
+              <Button variant="text" size="small" onClick={handleSelectJava}>选择 Java</Button>
+              {current.javaPath && <Button variant="text" size="small" color="inherit" onClick={handleClearJava}>恢复自动检测</Button>}
+            </Box>
+            {javaError && <Alert severity="warning">{javaError}</Alert>}
+          </Box>
+        )}
       </Paper>
 
       {current && (
@@ -429,7 +487,12 @@ export function ServerPage({ active }: { active: boolean }) {
             <Button variant="outlined" color="warning" onClick={() => void handleDeleteAction(false)}>
               从列表中移除（不删除文件）
             </Button>
-            <Button variant="contained" color="error" onClick={() => void handleDeleteAction(true)}>
+            <Button
+              variant="contained"
+              color="error"
+              onClick={() => void handleDeleteAction(true)}
+              disabled={!current?.managedPath}
+            >
               从列表中移除并删除文件
             </Button>
           </Box>

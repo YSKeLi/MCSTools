@@ -1,6 +1,6 @@
 {
   "name": "minecraft-server-tools",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Cross-platform Minecraft server toolkit.",
   "author": {
     "name": "YSKeLi",
@@ -17,26 +17,33 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "tsc -p tsconfig.main.json && vite build",
+    "test": "npm run build:main && node --test tests/*.test.cjs",
     "dist": "npm run build && electron-builder",
+    "dist:win": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "dist:win:unsigned": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -AllowUnsigned",
+    "audit": "npm audit --registry=https://registry.npmjs.org",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc --noEmit"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@mui/material": "^5.16.7",
     "@emotion/react": "^11.13.3",
     "@emotion/styled": "^11.13.0",
-    "@mui/icons-material": "^5.16.7"
+    "@mui/icons-material": "^5.16.7",
+    "@mui/material": "^5.16.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ssh2": "^1.17.0",
+    "systeminformation": "^5.33.0"
   },
   "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@types/ssh2": "^1.15.5",
+    "@vitejs/plugin-react": "^4.3.2",
+    "concurrently": "^8.2.2",
     "electron": "^31.6.0",
     "electron-builder": "^24.13.3",
     "typescript": "^5.5.4",
     "vite": "^5.4.8",
-    "@vitejs/plugin-react": "^4.3.2",
-    "@types/react": "^18.3.5",
-    "@types/react-dom": "^18.3.0",
-    "concurrently": "^8.2.2",
     "wait-on": "^8.0.1"
   }
 }

@@ -6,11 +6,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadCore: (coreId: string, version: string, destDir: string) =>
     ipcRenderer.invoke('core:download', coreId, version, destDir),
 
-  startServer: (serverDir: string, jarName: string, maxRam: number, javaPath?: string) =>
-    ipcRenderer.invoke('server:start', serverDir, jarName, maxRam, javaPath),
-  stopServer: () => ipcRenderer.invoke('server:stop'),
+  startServer: (serverId: string, maxRam: number) => ipcRenderer.invoke('server:start', serverId, maxRam),
+  stopServer: (serverId: string) => ipcRenderer.invoke('server:stop', serverId),
+  forceStopServer: (serverId: string) => ipcRenderer.invoke('server:forceStop', serverId),
   getServerStatus: () => ipcRenderer.invoke('server:status'),
-  sendServerCommand: (cmd: string) => ipcRenderer.invoke('server:command', cmd),
+  sendServerCommand: (serverId: string, cmd: string) => ipcRenderer.invoke('server:command', serverId, cmd),
+  getLocalSystemMetrics: () => ipcRenderer.invoke('system:getMetrics'),
 
   serversList: () => ipcRenderer.invoke('servers:list'),
   serversAdd: (s: any) => ipcRenderer.invoke('servers:add', s),
@@ -22,24 +23,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('servers:changed', h) }
   },
 
-  readFile: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
-  writeFile: (filePath: string, content: string) => ipcRenderer.invoke('file:write', filePath, content),
+  readServerProperties: (serverId: string) => ipcRenderer.invoke('serverFiles:readProperties', serverId),
+  writeServerProperties: (serverId: string, content: string) => ipcRenderer.invoke('serverFiles:writeProperties', serverId, content),
+  readServerProfile: (directory: string) => ipcRenderer.invoke('serverFiles:readProfile', directory),
+  writeServerProfile: (directory: string, content: string) => ipcRenderer.invoke('serverFiles:writeProfile', directory, content),
+  createManagedServerDirectory: (parentDirectory: string, serverName: string) => ipcRenderer.invoke('serverFiles:createManagedDirectory', parentDirectory, serverName),
+  discardManagedServerDirectory: (directory: string) => ipcRenderer.invoke('serverFiles:discardManagedDirectory', directory),
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
+  selectJavaExecutable: () => ipcRenderer.invoke('dialog:selectJavaExecutable'),
 
   detectJava: () => ipcRenderer.invoke('java:detect'),
+  getJavaSystemProfile: () => ipcRenderer.invoke('java:getSystemProfile'),
+  getJavaPackages: () => ipcRenderer.invoke('java:getPackages'),
+  getJavaOfficialPage: () => ipcRenderer.invoke('java:getOfficialPage'),
+  downloadJavaPackage: (packageId: string) => ipcRenderer.invoke('java:downloadPackage', packageId),
   detectServer: (dir: string) => ipcRenderer.invoke('server:detect', dir),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
   downloadAndInstallUpdate: () => ipcRenderer.invoke('app:downloadAndInstallUpdate'),
   openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
 
-  onServerLog: (callback: (log: string) => void) => {
-    const h = (_: any, log: string) => callback(log)
+  remoteServersList: () => ipcRenderer.invoke('remoteServers:list'),
+  remoteServerFingerprint: (input: any) => ipcRenderer.invoke('remoteServers:fingerprint', input),
+  remoteServersAdd: (input: any) => ipcRenderer.invoke('remoteServers:add', input),
+  remoteServersRemove: (id: string) => ipcRenderer.invoke('remoteServers:remove', id),
+  remoteServerGetMetrics: (id: string) => ipcRenderer.invoke('remoteServers:getMetrics', id),
+
+  onServerLog: (callback: (event: any) => void) => {
+    const h = (_: any, event: any) => callback(event)
     ipcRenderer.on('server:log', h)
     return () => { ipcRenderer.removeListener('server:log', h) }
   },
-  onServerStatus: (callback: (status: string) => void) => {
-    const h = (_: any, status: string) => callback(status)
+  onServerStatus: (callback: (state: any) => void) => {
+    const h = (_: any, state: any) => callback(state)
     ipcRenderer.on('server:status', h)
     return () => { ipcRenderer.removeListener('server:status', h) }
   },
@@ -53,10 +69,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update:downloadProgress', h)
     return () => { ipcRenderer.removeListener('update:downloadProgress', h) }
   },
+  onJavaDownloadProgress: (callback: (p: any) => void) => {
+    const h = (_: any, p: any) => callback(p)
+    ipcRenderer.on('java:downloadProgress', h)
+    return () => { ipcRenderer.removeListener('java:downloadProgress', h) }
+  },
 
-  frpStart: (config: any) => ipcRenderer.invoke('frp:start', config),
   frpStop: () => ipcRenderer.invoke('frp:stop'),
   frpStatus: () => ipcRenderer.invoke('frp:status'),
+  frpConfigsList: () => ipcRenderer.invoke('frpConfigs:list'),
+  frpConfigsPickFile: () => ipcRenderer.invoke('frpConfigs:pickFile'),
+  frpConfigsAdd: (name: string, filePath: string) => ipcRenderer.invoke('frpConfigs:add', name, filePath),
+  frpConfigsRemove: (id: string) => ipcRenderer.invoke('frpConfigs:remove', id),
+  frpConfigsStart: (id: string) => ipcRenderer.invoke('frpConfigs:start', id),
+  onFrpConfigsChanged: (callback: () => void) => {
+    const h = () => callback()
+    ipcRenderer.on('frpConfigs:changed', h)
+    return () => { ipcRenderer.removeListener('frpConfigs:changed', h) }
+  },
   onFrpLog: (callback: (log: string) => void) => {
     const h = (_: any, log: string) => callback(log)
     ipcRenderer.on('frp:log', h)

@@ -4,62 +4,128 @@
 
 <h1 align="center">MCServerTools</h1>
 
-<p align="center">
-  跨平台 Minecraft 服务器搭建工具
-</p>
-
-<p align="center">
-  <i>"化繁为简，让每一位服主都能专注于游戏本身的纯粹。"</i>
-</p>
+<p align="center">跨平台 Minecraft 服务器管理工具</p>
 
 <p align="center">
   <a href="https://github.com/YSKeLi/MCSTools/releases"><img src="https://img.shields.io/github/v/release/YSKeLi/MCSTools?color=brightgreen&label=version" alt="Version"></a>
-  <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/badge/language-React%20%7C%20Electron-blueviolet" alt="Language"></a>
+  <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/badge/React-Electron-blue" alt="Technology"></a>
   <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platform"></a>
   <a href="https://github.com/YSKeLi/MCSTools/issues"><img src="https://img.shields.io/github/issues/YSKeLi/MCSTools?color=orange" alt="Issues"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/YSKeLi/MCSTools?color=yellow" alt="License"></a>
-  <a href="https://github.com/YSKeLi/MCSTools"><img src="https://img.shields.io/github/stars/YSKeLi/MCSTools?style=social" alt="Stars"></a>
 </p>
 
-> **注意：** 目前 MCServerTools 处于开发完善阶段，可能存在部分 BUG，欢迎通过 Issues 提交反馈。
+> 当前项目仍在持续完善中。如果遇到问题，请附上复现步骤和相关日志提交 Issue。
 
 ---
 
 ## 目录
 
-- [主要特点](#主要特点)
-- [支持系统](#支持系统)
-- [快速上手](#快速上手)
+- [功能](#功能)
+- [下载安装](#下载安装)
+- [支持平台](#支持平台)
+- [快速开始](#快速开始)
+- [远程服务器](#远程服务器)
+- [FRP 穿透](#frp-穿透)
+- [开发与构建](#开发与构建)
 - [常见问题](#常见问题)
-- [支持的核心](#支持核心)
+- [支持的核心](#支持的核心)
 - [项目结构](#项目结构)
-- [社区与支持](#社区与支持)
-- [鸣谢](#鸣谢)
 - [协议与免责声明](#协议与免责声明)
 
 ---
 
-## 主要特点
+## 功能
 
-- **一键部署**：选择核心 → 选择版本 → 自动下载 → 开箱即用
-- **多核心支持**：内置 10 种核心（Vanilla / Paper / Purpur / Forge / Fabric / NeoForge / Sponge / Mohist / CraftBukkit / Spigot）
-- **配置管理**：图形化修改 `server.properties`，提供全中文标注，无需手动查阅文档
-- **内网穿透**：内置 frp 客户端，一键将本地服务器端口暴露到公网
-- **现代 UI**：采用 Material Design 设计规范，注重界面的丝滑过渡与高质感细节，支持浅色与深色主题无缝切换
-
----
-
-## 支持系统
-
-- **Windows 10+** (支持架构：AMD64 / ARM64)
-- **macOS** (支持架构：Intel / Apple Silicon)
-- **Linux** (支持架构：AMD64 / ARM64)
+- **核心下载**：通过 [MSL 开服器](https://www.mslmc.cn/) 提供的核心列表和下载服务，选择 Minecraft 服务端核心和版本并下载。
+- **本地服务器管理**：添加多个本地服务器，启动、停止、强制停止和发送控制台命令。
+- **服务器配置**：编辑 `server.properties`，为每个服务器设置内存和 Java 路径。
+- **Java 管理**：检测本机 Java 环境，自动匹配系统和处理器架构，下载 Oracle Java 21 LTS。
+- **本机监控**：查看本机 CPU、内存和硬盘使用情况。
+- **云服务器管理（实验性）**：通过 SSH 连接 Windows Server 或 Linux 服务器，查看系统资源和基本信息。
+- **FRP 穿透**：导入、命名、切换和启动 FRP 配置文件。
+- **软件更新**：检查新版本，自动匹配当前平台安装包，下载并校验后安装。
+- **主题切换**：支持浅色和深色主题。
 
 ---
 
-## 快速上手
+## 下载安装
 
-获取源码并启动开发环境：
+普通用户请前往 [GitHub Releases](https://github.com/YSKeLi/MCSTools/releases) 下载对应平台的发行包。
+
+| 平台 | 可用格式 |
+| --- | --- |
+| Windows | NSIS 安装包、MSI 安装包、ZIP 压缩包 |
+| macOS | DMG、ZIP |
+| Linux | AppImage、DEB、RPM |
+
+Windows 和 macOS 发行包可能未经过商业代码签名。首次运行时，请根据系统安全提示确认是否打开应用。
+
+Linux AppImage 可能需要先赋予执行权限：
+
+```bash
+chmod +x ./MCServerTools-Linux-x64.AppImage
+./MCServerTools-Linux-x64.AppImage
+```
+
+---
+
+## 支持平台
+
+- Windows 10 及以上：AMD64、ARM64
+- macOS：Intel、Apple Silicon
+- Linux：AMD64、ARM64
+
+Java 下载包和具体发行包会根据当前系统与处理器架构自动匹配；如果 Oracle 没有提供对应平台的安装包，Java 管理页面会提示前往官方页面确认。
+
+---
+
+## 快速开始
+
+1. 打开“核心选择”，选择核心、版本和服务器目录。
+2. 下载完成后，在“本地服务器管理”中添加该目录。
+3. 确认 Java 环境和服务器内存配置。
+4. 启动服务器并在控制台中查看运行日志。
+
+服务器启动前，程序会检查所需 Java 版本。未检测到合适版本时，请打开“Java 管理”安装 Java 21，或在服务器配置中选择已有的 Java 可执行文件。
+
+启动 Minecraft 服务端会写入 `eula.txt` 中的 `eula=true`。使用前请阅读并接受 [Minecraft EULA](https://www.minecraft.net/en-us/eula) 及相关条款。
+
+---
+
+## 远程服务器
+
+云服务器管理目前处于实验性开发阶段，属于半成品功能。当前支持通过 SSH 添加 Windows Server 或 Linux 服务器，并查看 CPU、内存、硬盘和基本系统信息；暂不支持远程开关机、远程文件管理、远程控制台和 SSH 密钥登录。功能和连接方式后续可能调整。
+
+远程服务器使用 SSH 连接，不需要安装 MCServerTools 客户端。
+
+### Windows Server
+
+- 远程服务器需要运行 OpenSSH Server。
+- 需要使用 Windows 账户密码登录，Windows Hello PIN 不能用于 SSH 登录。
+- 指标采集使用 PowerShell 和 CIM 查询。
+
+### Linux
+
+- 远程服务器需要运行 SSH Server。
+- 指标采集使用远程 Shell 和标准 Linux 系统文件。
+
+添加服务器时，程序会先读取 SSH 主机指纹。确认指纹后才会保存连接信息。密码使用系统安全存储加密保存，不会上传到第三方服务。
+
+---
+
+## FRP 穿透
+
+在“FRP 设置”中导入已有的 `.toml`、`.ini` 或 `.conf` 配置文件，并为配置设置名称。之后可以从列表中选择配置、启动或删除配置记录。
+
+首次启动时，程序会自动下载匹配平台的 `frpc`，并优先保存到应用目录下的 `runtime/frp`。下载文件会进行完整性校验，运行日志会显示在 FRP 页面中。
+
+---
+
+## 开发与构建
+
+### 开发环境
+
+需要安装 Node.js 和 npm：
 
 ```bash
 git clone https://github.com/YSKeLi/MCSTools.git
@@ -68,87 +134,66 @@ npm install
 npm run dev
 ```
 
-构建生产版本：
+### 常用命令
 
 ```bash
-npm run build
+npm run typecheck   # 类型检查
+npm test            # 构建主进程并运行测试
+npm run build       # 构建主进程和渲染进程
+npm run dist        # 构建完整发行包
 ```
+
+Windows 构建命令：
+
+```powershell
+npm run dist:win
+npm run dist:win:unsigned
+```
+
+构建产物默认输出到 `release/`。开发环境生成的主进程文件位于 `dist/`。
 
 ---
 
 ## 常见问题
 
-### macOS 提示无法打开或“已损坏”
+### `npm run dev` 提示找不到 `package.json`
 
-由于应用未经过 Apple 官方签名，首次打开时可能出现以下提示：
+请确认当前终端目录是项目根目录，并且该目录下存在 `package.json`。复制文件夹时应复制完整项目目录，不要只复制构建产物或安装目录。
 
-- “无法打开‘MCServerTools’，因为无法验证开发者。”
-- “‘MCServerTools’ 已损坏，无法打开。您应该将它移到废纸篓。”
+### Vite 提示端口 5173 已被占用
 
-这并不是应用真的损坏，而是 macOS 的 Gatekeeper 安全机制拦截。请按以下步骤解决：
+关闭占用 5173 端口的开发服务器，或结束对应的 Node.js 进程后再执行 `npm run dev`。
 
-1. **首次启动（推荐）**  
-   在访达中右键（或按住 Control 键再点击）应用图标，选择「打开」，然后在弹出的对话框中再次点击「打开」即可。
+### 启动服务器提示 `spawn java ENOENT`
 
-2. **如果仍然无法打开**  
-   打开「终端」应用，执行以下命令移除隔离属性（请将路径替换为你的实际位置，例如拖入应用图标即可自动填入路径）：
-   ```bash
-   sudo xattr -rd com.apple.quarantine /Applications/MCServerTools.app
-   ```
+请打开“Java 管理”确认 Java 是否已检测到，或在服务器配置中手动选择 `java.exe`。服务器所需 Java 版本必须满足对应 Minecraft 版本要求。
 
-3. **如果提示 “Apple 无法检查是否包含恶意软件” 且没有「打开」按钮**  
-   进入「系统设置」→「隐私与安全性」，在页面底部找到关于 MCServerTools 的被拦截记录，点击「仍要打开」进行确认。
+### Windows 远程服务器 SSH 登录失败
 
-完成后即可正常使用，后续版本更新也只需重复一次上述操作。
+确认远程 SSH 服务正在运行、22 端口可访问、账户已启用，并使用账户实际密码而不是 Windows Hello PIN。Windows 本地账户直接填写账户名即可。
+
+### macOS 提示无法验证开发者
+
+在访达中右键应用并选择“打开”。如果仍然无法启动，请在“系统设置”的“隐私与安全性”中允许打开该应用。
 
 ---
 
-### 如何在 Linux 下运行 AppImage 文件
+## 支持的核心
 
-我们为 Linux 提供了 `.AppImage` 格式的发行包，无需安装，开箱即用。使用方法如下：
+核心列表由在线数据源动态获取，当前包含以下核心类型：
 
-1. **赋予可执行权限**  
-   右键点击 `.AppImage` 文件 →「属性」→「权限」→ 勾选「允许作为程序执行」。  
-   或者打开终端，切换到文件所在目录，执行：
-   ```bash
-   chmod +x ./MCServerTools-x.x.x.AppImage
-   ```
+- Vanilla
+- Paper
+- Purpur
+- Forge
+- Fabric
+- NeoForge
+- Sponge
+- Mohist
+- CraftBukkit
+- Spigot
 
-2. **运行应用**  
-   双击文件即可运行，或在终端中执行：
-   ```bash
-   ./MCServerTools-x.x.x.AppImage
-   ```
-
-3. **（可选）集成到桌面环境**  
-   若希望像普通应用一样从启动器打开，可以手动创建 `~/.local/share/applications/mcservertools.desktop` 文件，内容如下（请将 `Exec` 和 `Icon` 的路径替换为实际路径）：
-   ```ini
-   [Desktop Entry]
-   Name=MCServerTools
-   Comment=Minecraft 服务器搭建工具
-   Exec=/home/你的用户名/Applications/MCServerTools-x.x.x.AppImage
-   Icon=/home/你的用户名/.local/share/icons/mcservertools.png
-   Type=Application
-   Categories=Utility;
-   Terminal=false
-   ```
-   保存后，桌面环境会自动识别并出现在应用菜单中。
-
----
-
-## 支持核心
-
-- <img src="public/icons/vanilla.ico" width="20" height="20"> **Vanilla**：最纯净的原版体验
-- <img src="public/icons/paper.ico" width="20" height="20"> **Paper**：高性能 Bukkit 服务端
-- <img src="public/icons/purpur.ico" width="20" height="20"> **Purpur**：更多自定义配置
-- <img src="public/icons/craftbukkit.ico" width="20" height="20"> **CraftBukkit**：最早的 Bukkit 实现
-- <img src="public/icons/spigot.svg" width="20" height="20"> **Spigot**：CraftBukkit 优化版
-- <img src="public/icons/forge.ico" width="20" height="20"> **Forge**：最流行的 Mod 加载器
-- <img src="public/icons/fabric.svg" width="20" height="20"> **Fabric**：轻量级 Mod 加载器
-- <img src="public/icons/neoforge.ico" width="20" height="20"> **NeoForge**：Forge 的下一代分支
-- <img src="public/icons/sponge.ico" width="20" height="20"> **Sponge**：全新架构 Mod API
-- <img src="public/icons/mohist.png" width="20" height="20"> **Mohist**：Mod + 插件混合核心
-
+可用版本和下载地址以应用内实际显示为准。
 
 ---
 
@@ -156,41 +201,41 @@ npm run build
 
 ```text
 MCServerTools/
-├── src/
-│   ├── main/          # Electron 主进程代码
-│   ├── renderer/      # React 前端代码 (Material UI)
-│   └── shared/        # 共享的类型定义与工具方法
-├── public/icons/      # 核心图标与静态资源
-├── scripts/           # 辅助工具与构建脚本
-├── dist/              # 编译打包输出目录
-└── package.json       # 项目配置文件与依赖管理
+├── src/main/       # Electron 主进程、服务器、Java、FRP、更新和远程连接逻辑
+├── src/renderer/   # React + Material UI 界面
+├── public/         # 图标和静态资源
+├── scripts/        # 构建脚本
+├── tests/          # 自动化测试
+├── dist/           # 编译输出目录
+└── package.json    # 项目配置和依赖管理
 ```
 
 ---
 
 ## 社区与支持
 
-如果在安装或使用过程中遇到任何问题，或者有新的功能建议，欢迎随时交流：
+- [提交 Issue](https://github.com/YSKeLi/MCSTools/issues)
+- [查看 Releases](https://github.com/YSKeLi/MCSTools/releases)
 
-- **提交 Issue**：[GitHub Issues 页面](https://github.com/YSKeLi/MCSTools/issues)
-- **获取最新版本**：[GitHub Releases 页面](https://github.com/YSKeLi/MCSTools/releases)
+提交问题时，请附上系统版本、处理器架构、软件版本、复现步骤和错误日志。请不要公开密码、API Key、SSH 私钥或其他敏感信息。
 
 ---
 
 ## 鸣谢
 
-MCServerTools 的诞生离不开以下优秀的开源项目与社区生态：
-
-- **frp**：提供稳定高效的内网穿透反向代理支持。
-- **PaperMC / Purpur / Fabric 等开源社区**：为工具提供了可靠的服务端 API 数据源。
-- **Material UI**：为本工具的前端界面提供了高质量的组件库支持。
+- [MSL 开服器](https://www.mslmc.cn/)：提供 Minecraft 服务端核心列表、版本信息和下载镜像支持
+- [frp](https://github.com/fatedier/frp)：内网穿透支持
+- [PaperMC](https://papermc.io/)、[Purpur](https://purpurmc.org/)、[Fabric](https://fabricmc.net/) 等社区：服务端核心和生态支持
+- [Material UI](https://mui.com/)：界面组件库
+- [ssh2](https://github.com/mscdex/ssh2)：SSH 连接支持
+- [systeminformation](https://github.com/sebhildebrandt/systeminformation)：本机系统信息支持
 
 ---
 
 ## 协议与免责声明
 
-本项目采用 **MIT License** 开源协议，您可以自由地使用、修改和分发本项目代码，但需保留完整的版权声明和免责声明。
+本项目采用 [MIT License](LICENSE) 开源协议。
 
-**合规注意**：
-- 使用本工具下载和运行 Minecraft 服务端即表示您同意并遵守 Mojang 的 [最终用户许可协议 (EULA)](https://account.mojang.com/documents/minecraft_eula)。
-- 本项目仅提供纯粹的技术聚合与自动化下载服务，不对任何通过本工具架设的服务器内产生的内容或纠纷负责。
+MCServerTools 只提供服务器管理、文件下载和连接工具，不代表 Mojang、Microsoft、Oracle、MSL、FRP 或任何 Minecraft 服务端核心项目。项目使用 MSL 提供的公开接口，但与 MSL 开服器不存在隶属或官方合作关系。使用第三方软件、服务端核心和远程服务器时，请遵守对应项目的许可证、服务条款及当地法律法规。
+
+使用本工具运行 Minecraft 服务端前，请阅读并接受 [Minecraft EULA](https://www.minecraft.net/en-us/eula)。

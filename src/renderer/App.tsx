@@ -15,14 +15,16 @@ import {
 } from '@mui/material'
 import { Layout } from './components/Layout'
 import { AboutPage } from './pages/AboutPage'
+import { RemoteServerPage } from './pages/RemoteServerPage'
 import { CoreSelectPage } from './pages/CoreSelectPage'
 import { FrpPage } from './pages/FrpPage'
 import { HomePage } from './pages/HomePage'
+import { JavaManagerPage } from './pages/JavaManagerPage'
 import { ServerPage } from './pages/ServerPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { darkTheme, lightTheme } from './theme'
 
-export type Page = 'home' | 'cores' | 'server' | 'frp' | 'settings' | 'about'
+export type Page = 'home' | 'cores' | 'cloud' | 'server' | 'frp' | 'java' | 'settings' | 'about'
 
 function compareVersions(currentVersion: string, latestVersion: string): number {
   const current = currentVersion.split('.').map(part => parseInt(part, 10) || 0)
@@ -137,16 +139,22 @@ export function App() {
           onToggleDark={() => setDarkMode(value => !value)}
         >
           <Box sx={{ display: page === 'home' ? '' : 'none' }}>
-            <HomePage onNavigate={setPage} />
+            <HomePage onNavigate={setPage} active={page === 'home'} />
           </Box>
           <Box sx={{ display: page === 'cores' ? '' : 'none' }}>
             <CoreSelectPage />
+          </Box>
+          <Box sx={{ display: page === 'cloud' ? '' : 'none' }}>
+            <RemoteServerPage active={page === 'cloud'} />
           </Box>
           <Box sx={{ display: page === 'server' ? '' : 'none' }}>
             <ServerPage active={page === 'server'} />
           </Box>
           <Box sx={{ display: page === 'frp' ? '' : 'none' }}>
             <FrpPage />
+          </Box>
+          <Box sx={{ display: page === 'java' ? '' : 'none' }}>
+            <JavaManagerPage />
           </Box>
           <Box sx={{ display: page === 'settings' ? '' : 'none' }}>
             <SettingsPage />

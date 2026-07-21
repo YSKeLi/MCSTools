@@ -224,6 +224,12 @@ export async function downloadCore(id: string, version: string, destDir: string,
 
   const fileName = getDownloadFileName(id, version, response.data.url)
   const filePath = path.join(destDir, fileName)
-  await downloadFile(response.data.url, filePath, win)
+  const expectedSha256 = response.data.sha256?.replace(/^sha256:/i, '').trim().toLowerCase()
+  if (!expectedSha256 || !/^[a-f0-9]{64}$/.test(expectedSha256)) {
+    throw new Error('下载源未提供有效的 SHA-256 校验值，已拒绝下载')
+  }
+  await downloadFile(response.data.url, filePath, win, {
+    expectedSha256,
+  })
   return filePath
 }

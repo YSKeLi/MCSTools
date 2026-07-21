@@ -22,7 +22,7 @@ import {
   Typography,
 } from '@mui/material'
 import { ArrowBack, CheckCircle, CloudDownload, Refresh, Search } from '@mui/icons-material'
-import { SERVER_PROFILE_FILE, serializeServerProfile } from '../serverProfile'
+import { serializeServerProfile } from '../serverProfile'
 
 type Step = 'category' | 'core' | 'version'
 const MSL_LOGO_URL = 'https://www.mslmc.cn/logo.png'
@@ -51,13 +51,6 @@ function formatSpeed(bytes: number): string {
 function getBaseName(filePath: string): string {
   const parts = filePath.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] || 'server.jar'
-}
-
-function joinPath(...parts: string[]) {
-  return parts
-    .filter(Boolean)
-    .map((part, index) => index === 0 ? part.replace(/[\\/]+$/, '') : part.replace(/^[\\/]+|[\\/]+$/g, ''))
-    .join('/')
 }
 
 function shouldAutoRegisterDownloadedFile(filePath: string): boolean {
@@ -271,13 +264,15 @@ export function CoreSelectPage() {
     setProgress(0)
     setSpeed(0)
 
+    let serverDirectory = ''
     try {
-      const downloadedPath = await window.electronAPI.downloadCore(selectedCoreId, chosenVersion, destDir)
+      serverDirectory = await window.electronAPI.createManagedServerDirectory(destDir, serverName.trim())
+      const downloadedPath = await window.electronAPI.downloadCore(selectedCoreId, chosenVersion, serverDirectory)
       const downloadedName = getBaseName(downloadedPath)
 
       if (selectedCore && shouldAutoRegisterDownloadedFile(downloadedPath)) {
-        await window.electronAPI.writeFile(
-          joinPath(destDir, SERVER_PROFILE_FILE),
+        await window.electronAPI.writeServerProfile(
+          serverDirectory,
           serializeServerProfile({
             serverName: serverName.trim(),
             gameVersion: chosenVersion,
@@ -287,16 +282,15 @@ export function CoreSelectPage() {
         )
 
         await window.electronAPI.serversAdd({
-          id: `${Date.now()}`,
           name: serverName.trim(),
-          path: destDir,
+          path: serverDirectory,
           coreId: selectedCoreId,
           coreName: selectedCore.name,
           version: chosenVersion,
           jarName: downloadedName,
           iconUrl: selectedCore.iconUrl,
-          createdAt: new Date().toISOString(),
           maxRam: 2048,
+          managedPath: true,
         })
 
         setDoneMessage(`下载完成，已自动加入服务器列表：${serverName.trim()}`)
@@ -306,6 +300,7 @@ export function CoreSelectPage() {
 
       setDone(true)
     } catch (err: any) {
+      if (serverDirectory) await window.electronAPI.discardManagedServerDirectory(serverDirectory).catch(() => undefined)
       setError(err.message || '下载失败')
     } finally {
       setDownloading(false)

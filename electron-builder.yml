@@ -9,13 +9,22 @@ files:
   - "!dist/**/*.map"
 icon: public/icons/app-icon.png
 win:
+  artifactName: MCServerTools-Windows-${arch}.${ext}
   target:
     - nsis
     - msi
+    - zip
 mac:
-  target: dmg
+  artifactName: MCServerTools-macOS-${arch}.${ext}
+  target:
+    - dmg
+    - zip
 linux:
-  target: AppImage
+  artifactName: MCServerTools-Linux-${arch}.${ext}
+  target:
+    - AppImage
+    - deb
+    - rpm
   category: Utility
   maintainer: "YSKeLi <110509979+YSKeLi@users.noreply.github.com>"
 msi:

@@ -14,8 +14,10 @@ import {
   useTheme,
 } from '@mui/material'
 import {
+  CloudQueue as CloudIcon,
   DarkMode,
   Dashboard as ServerIcon,
+  Memory as JavaIcon,
   Dns as CoreIcon,
   Home as HomeIcon,
   Info as InfoIcon,
@@ -28,12 +30,14 @@ import { Page } from '../App'
 const DRAWER_WIDTH = 220
 
 const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
-  { id: 'home', label: '首页', icon: <HomeIcon /> },
-  { id: 'cores', label: '核心选择', icon: <CoreIcon /> },
-  { id: 'server', label: '服务器管理', icon: <ServerIcon /> },
-  { id: 'frp', label: 'FRP 设置', icon: <FrpIcon /> },
-  { id: 'settings', label: '设置', icon: <SettingsIcon /> },
-  { id: 'about', label: '关于', icon: <InfoIcon /> },
+  { id: 'home', label: '\u9996\u9875', icon: <HomeIcon /> },
+  { id: 'cores', label: '\u6838\u5FC3\u9009\u62E9', icon: <CoreIcon /> },
+  { id: 'cloud', label: '\u4E91\u670D\u52A1\u5668\u7BA1\u7406', icon: <CloudIcon /> },
+  { id: 'server', label: '\u672C\u5730\u670D\u52A1\u5668\u7BA1\u7406', icon: <ServerIcon /> },
+  { id: 'frp', label: 'FRP \u8BBE\u7F6E', icon: <FrpIcon /> },
+  { id: 'java', label: 'Java \u7BA1\u7406', icon: <JavaIcon /> },
+  { id: 'settings', label: '\u8BBE\u7F6E', icon: <SettingsIcon /> },
+  { id: 'about', label: '\u5173\u4E8E', icon: <InfoIcon /> },
 ]
 
 interface Props {
@@ -61,7 +65,7 @@ export function Layout({ page, onPageChange, darkMode, onToggleDark, children }:
       >
         <Toolbar>
           <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
-            Minecraft 服务器搭建工具
+            {'Minecraft \u670D\u52A1\u5668\u642D\u5EFA\u5DE5\u5177'}
           </Typography>
           <IconButton color="inherit" onClick={onToggleDark}>
             {darkMode ? <LightMode /> : <DarkMode />}

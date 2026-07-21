@@ -1,31 +1,54 @@
 import { ChildProcess, spawn } from 'child_process'
 import { BrowserWindow } from 'electron'
-import * as path from 'path'
 import * as fs from 'fs'
+import * as path from 'path'
+import { resolveJava } from '../java'
+import { requiredJavaMajor } from './javaPolicy'
 
 interface ServerConfig {
+  serverId: string
   serverDir: string
   jarPath: string
   jarName: string
+  version: string
   maxRam: number
   javaPath?: string
   extraArgs?: string[]
+}
+
+export type ServerProcessStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'error'
+
+export interface ServerRuntimeState {
+  serverId: string | null
+  status: ServerProcessStatus
 }
 
 export class ServerManager {
   private process: ChildProcess | null = null
   private config: ServerConfig | null = null
   private mainWindow: BrowserWindow | null = null
+  private status: ServerProcessStatus = 'stopped'
+  private forceStopTimer: NodeJS.Timeout | null = null
 
   setWindow(win: BrowserWindow) { this.mainWindow = win }
-  get running() { return this.process !== null && !this.process.killed }
+  get running() { return this.process !== null }
 
-  private emitLog(line: string) {
-    this.mainWindow?.webContents.send('server:log', line)
+  getState(): ServerRuntimeState {
+    return { serverId: this.process ? this.config?.serverId || null : null, status: this.status }
   }
 
-  private emitStatus(status: string) {
-    this.mainWindow?.webContents.send('server:status', status)
+  private emitLog(line: string, serverId = this.config?.serverId || null) {
+    this.mainWindow?.webContents.send('server:log', { serverId, line })
+  }
+
+  private emitStatus(status: ServerProcessStatus, serverId = this.config?.serverId || null) {
+    this.status = status
+    this.mainWindow?.webContents.send('server:status', { serverId, status })
+  }
+
+  private clearForceStopTimer() {
+    if (this.forceStopTimer) clearTimeout(this.forceStopTimer)
+    this.forceStopTimer = null
   }
 
   private ensureEulaAccepted(serverDir: string) {
@@ -39,30 +62,31 @@ export class ServerManager {
     ].join('\n')
 
     fs.mkdirSync(serverDir, { recursive: true })
-
     try {
-      if (!fs.existsSync(eulaPath) || !/^\s*eula\s*=\s*true\s*$/im.test(fs.readFileSync(eulaPath, 'utf-8'))) {
-        fs.writeFileSync(eulaPath, eulaContent, 'utf-8')
+      if (!fs.existsSync(eulaPath) || !/^\s*eula\s*=\s*true\s*$/im.test(fs.readFileSync(eulaPath, 'utf8'))) {
+        fs.writeFileSync(eulaPath, eulaContent, 'utf8')
         this.emitLog('[MST] 已自动写入 eula.txt 并同意 EULA')
       }
-    } catch (err: any) {
-      this.emitLog(`[MST] 写入 eula.txt 失败: ${err.message}`)
+    } catch (error) {
+      this.emitLog(`[MST] 写入 eula.txt 失败: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
-  start(config: ServerConfig) {
-    if (this.running) return
-    this.config = config
-    this.ensureEulaAccepted(config.serverDir)
-
-    if (!fs.existsSync(config.jarPath)) {
-      this.emitLog(`[MST] 启动失败: 找不到服务端 JAR: ${config.jarPath}`)
-      this.emitStatus('error')
-      this.process = null
-      return
+  async start(config: ServerConfig): Promise<void> {
+    if (this.process) {
+      if (this.config?.serverId === config.serverId) return
+      throw new Error('已有其他服务器正在运行，请先停止后再启动')
+    }
+    if (!fs.existsSync(config.jarPath) || !fs.statSync(config.jarPath).isFile()) {
+      throw new Error(`找不到服务端 JAR: ${config.jarPath}`)
     }
 
-    const java = config.javaPath || 'java'
+    const minimumJava = requiredJavaMajor(config.version)
+    const javaInfo = resolveJava(config.javaPath, minimumJava)
+    if (!javaInfo) throw new Error(`当前服务器需要 Java ${minimumJava} 或更高版本，请在 Java 管理中安装或重新选择`)
+
+    this.config = config
+    this.ensureEulaAccepted(config.serverDir)
     const args = [
       `-Xmx${config.maxRam}M`,
       '-jar',
@@ -71,60 +95,108 @@ export class ServerManager {
       ...(config.extraArgs || []),
     ]
 
-    this.emitStatus('starting')
-    this.emitLog(`[MST] 启动命令: ${java} ${args.join(' ')}`)
+    this.emitStatus('starting', config.serverId)
+    this.emitLog(`[MST] 使用 Java: ${javaInfo.path} (${javaInfo.version})`, config.serverId)
+    this.emitLog(`[MST] 启动命令: ${javaInfo.path} ${args.join(' ')}`, config.serverId)
 
-    this.process = spawn(java, args, {
+    const child = spawn(javaInfo.path, args, {
       cwd: config.serverDir,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     })
+    this.process = child
 
-    this.process.stdout?.on('data', (data: Buffer) => {
-      const lines = data.toString().split('\n').filter(Boolean)
-      lines.forEach(l => this.emitLog(l))
+    child.stdout?.on('data', (data: Buffer) => {
+      data.toString().split(/\r?\n/).filter(Boolean).forEach(line => this.emitLog(line, config.serverId))
     })
-
-    this.process.stderr?.on('data', (data: Buffer) => {
-      const lines = data.toString().split('\n').filter(Boolean)
-      lines.forEach(l => this.emitLog(`[ERR] ${l}`))
+    child.stderr?.on('data', (data: Buffer) => {
+      data.toString().split(/\r?\n/).filter(Boolean).forEach(line => this.emitLog(`[ERR] ${line}`, config.serverId))
     })
-
-    this.process.on('close', (code) => {
-      this.emitLog(`[MST] 服务端进程已退出 (code: ${code})`)
-      this.emitStatus('stopped')
+    child.on('close', (code) => {
+      if (this.process !== child) return
+      this.clearForceStopTimer()
+      this.emitLog(`[MST] 服务端进程已退出 (code: ${code})`, config.serverId)
       this.process = null
+      this.config = null
+      this.emitStatus('stopped', config.serverId)
     })
 
-    this.process.on('error', (err) => {
-      this.emitLog(`[MST] 启动失败: ${err.message}`)
-      this.emitStatus('error')
-      this.process = null
-    })
-
-    this.emitStatus('running')
-  }
-
-  stop() {
-    if (!this.running || !this.process) return
-    this.emitLog('[MST] 正在关闭服务端...')
-    this.process.stdin?.write('stop\n')
-    setTimeout(() => {
-      if (this.process && !this.process.killed) {
-        this.process.kill('SIGKILL')
-        this.emitLog('[MST] 强制关闭')
+    await new Promise<void>((resolve, reject) => {
+      const onSpawn = () => {
+        child.off('error', onInitialError)
+        child.on('error', error => {
+          if (this.process !== child) return
+          this.emitLog(`[MST] 进程错误: ${error.message}`, config.serverId)
+          this.emitStatus('error', config.serverId)
+        })
+        this.emitStatus('running', config.serverId)
+        resolve()
       }
-    }, 10000)
+      const onInitialError = (error: Error) => {
+        child.off('spawn', onSpawn)
+        if (this.process === child) {
+          this.process = null
+          this.config = null
+        }
+        this.emitLog(`[MST] 启动失败: ${error.message}`, config.serverId)
+        this.emitStatus('error', config.serverId)
+        reject(error)
+      }
+      child.once('spawn', onSpawn)
+      child.once('error', onInitialError)
+    })
   }
 
-  sendCommand(cmd: string) {
-    if (!this.running || !this.process?.stdin) return
-    this.process.stdin.write(`${cmd}\n`)
+  stop(serverId: string): void {
+    this.assertActiveServer(serverId)
+    if (!this.process) return
+    this.emitStatus('stopping', serverId)
+    this.emitLog('[MST] 正在关闭服务端...', serverId)
+    this.process.stdin?.write('stop\n')
+    this.clearForceStopTimer()
+    this.forceStopTimer = setTimeout(() => this.forceStop(serverId), 10000)
   }
 
-  getConfig() { return this.config }
+  forceStop(serverId: string): void {
+    this.assertActiveServer(serverId)
+    this.clearForceStopTimer()
+    if (this.process) {
+      this.emitLog('[MST] 强制关闭服务端进程', serverId)
+      this.process.kill('SIGKILL')
+    }
+  }
 
-  getServerPropertiesPath(): string | null {
-    if (!this.config) return null
-    return path.join(this.config.serverDir, 'server.properties')
+  sendCommand(serverId: string, command: string): void {
+    this.assertActiveServer(serverId)
+    if (!this.process?.stdin) throw new Error('服务器控制台不可用')
+    const value = typeof command === 'string' ? command.trim() : ''
+    if (!value || /[\r\n]/.test(value) || value.length > 4096) throw new Error('服务器命令无效')
+    this.process.stdin.write(`${value}\n`)
+  }
+
+  private assertActiveServer(serverId: string) {
+    if (!this.process || !this.config) throw new Error('当前没有正在运行的服务器')
+    if (this.config.serverId !== serverId) throw new Error('所选服务器当前没有运行')
+  }
+
+  async shutdown(): Promise<void> {
+    if (!this.process || !this.config) return
+    const child = this.process
+    const serverId = this.config.serverId
+    try {
+      this.stop(serverId)
+    } catch {
+      child.kill('SIGKILL')
+    }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.process === child) child.kill('SIGKILL')
+        resolve()
+      }, 5000)
+      child.once('close', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 }

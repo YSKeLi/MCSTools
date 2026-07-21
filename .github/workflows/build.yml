@@ -115,13 +115,22 @@ jobs:
           import json
           from pathlib import Path
 
+          import os
+
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
           notes = [
-              "\u65b0\u589e\u8bbe\u7f6e\u9875\u9762\u4e0e\u68c0\u67e5\u66f4\u65b0\u529f\u80fd",
-              "\u91cd\u6784\u670d\u52a1\u7aef\u6838\u5fc3\u4e0b\u8f7d\u9875\u4ee5\u53ca\u903b\u8f91",
-              "\u91cd\u6784\u670d\u52a1\u7aef\u6838\u5fc3\u5217\u8868\u6765\u6e90",
-              "\u8865\u5145\u66f4\u591a\u6838\u5fc3\u7c7b\u578b\u7684\u81ea\u52a8\u8bc6\u522b\u652f\u6301",
+              "新增云服务器管理",
+              "新增本地设备信息监控",
+              "新增 Java 管理与 Java 21 下载",
+              "支持自动匹配系统和安装包",
+              "支持为服务器单独配置 Java",
+              "重构 FRP 配置导入与切换",
+              "优化 FRP 下载和启动流程",
+              "完善软件检查更新与自动安装",
+              "优化文件下载稳定性",
+              "修复服务器启动和进程控制问题",
           ]
-          body = "## v1.0.3 \u66f4\u65b0\u5185\u5bb9\n\n" + "\n".join(f"- {note}" for note in notes)
+          body = f"## v{version} 更新内容\n\n" + "\n".join(f"- {note}" for note in notes)
           Path("release-body.md").write_text(body + "\n", encoding="utf-8")
           Path("release-notes.json").write_text(json.dumps(notes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
@@ -141,6 +150,7 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > release.json
 
           python3 - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -149,6 +159,24 @@ jobs:
           version = tag[1:] if tag.startswith("v") else tag
           release = json.loads(Path("release.json").read_text(encoding="utf-8"))
           notes = json.loads(Path("release-notes.json").read_text(encoding="utf-8"))
+          artifact_files = {
+              path.name: path
+              for path in Path("artifacts").rglob("*")
+              if path.is_file()
+          }
+          assets = []
+          for asset in release.get("assets", []):
+              asset_path = artifact_files.get(asset["name"])
+              if asset_path is None:
+                  raise RuntimeError(f"Missing downloaded artifact: {asset['name']}")
+              digest = hashlib.sha256(asset_path.read_bytes()).hexdigest()
+              assets.append({
+                  "name": asset["name"],
+                  "url": asset["browser_download_url"],
+                  "size": asset.get("size"),
+                  "sha256": digest,
+              })
+
           latest = {
               "repo": os.environ["GITHUB_REPOSITORY"],
               "source": "github-release",
@@ -157,15 +185,8 @@ jobs:
               "title": tag,
               "publishedAt": release.get("published_at"),
               "url": release.get("html_url"),
-              "assets": [
-                  {
-                      "name": asset["name"],
-                      "url": asset["browser_download_url"],
-                      "size": asset.get("size"),
-                  }
-                  for asset in release.get("assets", [])
-              ],
-              "assetsCount": len(release.get("assets", [])),
+              "assets": assets,
+              "assetsCount": len(assets),
               "notes": notes,
           }
           Path("latest.json").write_text(json.dumps(latest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

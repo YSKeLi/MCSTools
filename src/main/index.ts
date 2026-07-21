@@ -1,8 +1,14 @@
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import * as path from 'path'
-import { registerIpcHandlers } from './ipc'
+import { registerIpcHandlers, shutdownServices } from './ipc'
 
 let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
 
 function log(message: string, extra?: unknown) {
   if (extra === undefined) {
@@ -40,6 +46,16 @@ async function createWindow() {
   })
 
   log('creating window', { isDev, preloadPath })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowed = isDev ? url.startsWith(rendererUrl) : url.startsWith('file://')
+    if (!allowed) event.preventDefault()
+  })
+  mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
   mainWindow.once('ready-to-show', () => {
     log('window ready-to-show')
@@ -80,7 +96,22 @@ async function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.on('second-instance', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
+app.on('before-quit', (event) => {
+  if (isQuitting) return
+  event.preventDefault()
+  isQuitting = true
+  void shutdownServices().finally(() => app.exit(0))
+})
+
+if (hasSingleInstanceLock) app.whenReady().then(() => {
   log('app ready')
   Menu.setApplicationMenu(null)
   void createWindow()

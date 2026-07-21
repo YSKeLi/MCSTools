@@ -1,0 +1,18 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { readJsonStore, writeJsonStore } = require('../dist/main/utils/jsonStore.js')
+
+test('atomically writes data and restores the previous backup', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mcstools-store-'))
+  const file = path.join(root, 'store.json')
+  const validate = value => Array.isArray(value)
+  writeJsonStore(file, ['first'])
+  writeJsonStore(file, ['second'])
+  assert.deepEqual(readJsonStore(file, [], validate, 'test'), ['second'])
+  fs.writeFileSync(file, '{broken', 'utf8')
+  assert.deepEqual(readJsonStore(file, [], validate, 'test'), ['first'])
+  fs.rmSync(root, { recursive: true, force: true })
+})

@@ -252,7 +252,6 @@ export class PersistentProcessController {
           reject(new Error('托管进程启动超时'))
         }
       }, 50)
-      timer.unref()
     })
   }
 

@@ -71,6 +71,13 @@ export function normalizeSha256(value?: string): string | undefined {
   return /^[a-f0-9]{64}$/.test(normalized) ? normalized : undefined
 }
 
+export function classifyWindowsAuthenticodeStatus(status: string): 'valid' | 'unsigned' | 'invalid' {
+  const normalized = status.trim()
+  if (normalized === 'Valid') return 'valid'
+  if (normalized === 'NotSigned') return 'unsigned'
+  return 'invalid'
+}
+
 export function assertTrustedUpdateAsset(asset: UpdateAsset): UpdateAsset & { sha256: string } {
   if (!asset || typeof asset !== 'object') throw new Error('更新资源信息无效')
   if (!asset.name || path.basename(asset.name) !== asset.name || !/^[A-Za-z0-9._-]+$/.test(asset.name)) {

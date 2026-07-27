@@ -5,6 +5,7 @@ import * as path from 'path'
 import { downloadFile, fetchJson } from '../utils/download'
 import {
   assertTrustedUpdateAsset,
+  classifyWindowsAuthenticodeStatus,
   compareVersions,
   normalizeSha256,
   selectUpdateAsset,
@@ -187,7 +188,14 @@ function verifyPlatformSignature(filePath: string): void {
       '-ExecutionPolicy', 'Bypass',
       '-EncodedCommand', encodedCommand,
     ], { encoding: 'utf8', windowsHide: true, timeout: 15000 })
-    if (result.status !== 0 || result.stdout.trim() !== 'Valid') {
+    if (result.status !== 0) {
+      throw new Error('无法验证更新安装包的数字签名，已拒绝执行')
+    }
+
+    const signatureStatus = classifyWindowsAuthenticodeStatus(result.stdout)
+    if (signatureStatus === 'unsigned') {
+      console.warn('[Update] Windows installer is unsigned; continuing after trusted-source and SHA-256 verification')
+    } else if (signatureStatus === 'invalid') {
       throw new Error('更新安装包数字签名无效，已拒绝执行')
     }
   }

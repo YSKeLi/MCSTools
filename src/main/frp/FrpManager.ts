@@ -72,6 +72,7 @@ export class FrpManager {
     if (persist) this.controller.appendLog(line, this.logPath)
     else this.mainWindow?.webContents.send('frp:log', line)
   }
+
   private emitStatus(s: string) {
     this.currentStatus = s
     this.mainWindow?.webContents.send('frp:status', s)
@@ -115,10 +116,13 @@ export class FrpManager {
 
   async ensureBinary(win?: BrowserWindow): Promise<string> {
     const frpcPath = this.getFrpcPath()
-    if (this.isBinaryUsable(frpcPath)) return frpcPath
+    const existingBinary = await this.validateBinaryUsable(frpcPath, { retries: 2, timeoutMs: 5000 })
+    if (existingBinary.ok) return frpcPath
+
     if (fs.existsSync(frpcPath)) {
-      this.emitLog('[FRP] 现有 frpc 文件无效，正在重新下载...')
-      fs.rmSync(frpcPath, { force: true })
+      const reason = existingBinary.error ? ` (${existingBinary.error.message})` : ''
+      this.emitLog(`[FRP] 现有 frpc 文件无效，正在重新下载...${reason}`)
+      this.tryRemovePath(frpcPath)
     }
 
     const suffix = this.getArchSuffix()
@@ -139,13 +143,12 @@ export class FrpManager {
         lastDownloadError = null
         break
       } catch (error) {
-        lastDownloadError = error instanceof Error ? error : new Error(String(error))
+        lastDownloadError = this.normalizeError(error)
         this.emitLog(`[FRP] ${source.label} 下载失败: ${lastDownloadError.message}`)
       }
     }
 
     if (lastDownloadError) throw lastDownloadError
-
     if (fs.statSync(archivePath).size <= 0) throw new Error('frpc 下载结果为空')
 
     try {
@@ -166,9 +169,9 @@ export class FrpManager {
 
       fs.copyFileSync(extractedBinary, frpcPath)
       if (process.platform !== 'win32') fs.chmodSync(frpcPath, 0o755)
-      if (!this.isBinaryUsable(frpcPath)) throw new Error('frpc 可执行文件验证失败')
+      await this.assertBinaryUsable(frpcPath)
     } catch (error) {
-      fs.rmSync(frpcPath, { force: true })
+      this.tryRemovePath(frpcPath)
       throw error
     } finally {
       this.tryRemovePath(extractDir, true)
@@ -179,14 +182,65 @@ export class FrpManager {
     return frpcPath
   }
 
-  private isBinaryUsable(filePath: string): boolean {
+  private async assertBinaryUsable(filePath: string) {
+    const result = await this.validateBinaryUsable(filePath)
+    if (result.ok) return
+
+    const reason = result.error ? `: ${result.error.message}` : ''
+    throw new Error(`frpc 可执行文件验证失败${reason}`)
+  }
+
+  private async validateBinaryUsable(
+    filePath: string,
+    options: { retries?: number, retryDelayMs?: number, timeoutMs?: number } = {},
+  ): Promise<{ ok: boolean, error?: Error }> {
     try {
-      if (!fs.existsSync(filePath) || fs.statSync(filePath).size <= 0) return false
-      execFileSync(filePath, ['-v'], { timeout: 5000, windowsHide: true, stdio: 'ignore' })
-      return true
-    } catch {
-      return false
+      if (!fs.existsSync(filePath) || fs.statSync(filePath).size <= 0) return { ok: false }
+    } catch (error) {
+      return { ok: false, error: this.normalizeError(error) }
     }
+
+    const retries = options.retries ?? (process.platform === 'win32' ? 4 : 1)
+    const retryDelayMs = options.retryDelayMs ?? 1200
+    const timeoutMs = options.timeoutMs ?? (process.platform === 'win32' ? 8000 : 5000)
+    let lastError: Error | undefined
+
+    for (let attempt = 1; attempt <= retries; attempt += 1) {
+      try {
+        execFileSync(filePath, ['-v'], { timeout: timeoutMs, windowsHide: true, stdio: 'ignore' })
+        return { ok: true }
+      } catch (error) {
+        lastError = this.normalizeBinaryValidationError(error, filePath)
+        if (attempt >= retries || !this.shouldRetryBinaryValidation(lastError)) break
+        if (attempt === 1) {
+          this.emitLog('[FRP] frpc 刚解压完成，可能仍在被 Windows 扫描，正在等待后重试...')
+        }
+        await this.delay(retryDelayMs * attempt)
+      }
+    }
+
+    return { ok: false, error: lastError }
+  }
+
+  private shouldRetryBinaryValidation(error: Error): boolean {
+    if (process.platform !== 'win32') return false
+    return /ETIMEDOUT|EPERM|EACCES|UNKNOWN|busy|used by another process|resource busy|拒绝访问|不允许访问|超时/i.test(error.message)
+  }
+
+  private normalizeBinaryValidationError(error: unknown, filePath: string): Error {
+    if (this.isWindowsFileBlocked(error, filePath)) {
+      return new Error('Windows 拦截或占用了 frpc 可执行文件，常见原因是安全中心将隧道程序标记为风险项。请在 Windows 安全中心查看检测记录后重试，应用不会绕过系统安全策略。')
+    }
+    return this.normalizeError(error)
+  }
+
+  private normalizeError(error: unknown): Error {
+    if (error instanceof Error) return error
+    return new Error(String(error))
+  }
+
+  private delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   private findExtractedBinary(dir: string, executableName: string): string | null {
@@ -220,14 +274,14 @@ export class FrpManager {
       }
       this.emitLog('[FRP] 安装包 SHA-256 校验通过')
     } catch (error) {
-      if (this.isWindowsArchiveBlocked(error, archivePath)) {
+      if (this.isWindowsFileBlocked(error, archivePath)) {
         throw new Error('Windows 拦截或占用了 frpc 安装包，常见原因是安全中心将隧道程序标记为风险项。请在 Windows 安全中心查看检测记录后重试，应用不会绕过系统安全策略。')
       }
       throw error
     }
   }
 
-  private isWindowsArchiveBlocked(error: unknown, archivePath: string): boolean {
+  private isWindowsFileBlocked(error: unknown, filePath: string): boolean {
     if (process.platform !== 'win32') return false
     const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
     const syscall = typeof error === 'object' && error && 'syscall' in error ? String((error as { syscall?: unknown }).syscall || '') : ''
@@ -235,8 +289,8 @@ export class FrpManager {
     const message = error instanceof Error ? error.message : String(error)
     if (/virus|potentially unwanted software|病毒|不需要的软件/i.test(message)) return true
     return ['EPERM', 'EACCES', 'UNKNOWN'].includes(code)
-      && ['open', 'read'].some((name) => syscall.toLowerCase().includes(name))
-      && (errorPath === archivePath || message.includes(archivePath))
+      && ['open', 'read', 'spawn', 'spawnsync'].some((name) => syscall.toLowerCase().includes(name))
+      && (errorPath === filePath || message.includes(filePath))
   }
 
   private tryRemovePath(targetPath: string, recursive = false) {

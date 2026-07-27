@@ -2,6 +2,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
   assertTrustedUpdateAsset,
+  classifyWindowsAuthenticodeStatus,
   compareVersions,
   normalizeSha256,
   selectUpdateAsset,
@@ -33,4 +34,12 @@ test('rejects untrusted update URLs and missing hashes', () => {
 test('compares semantic numeric versions', () => {
   assert.equal(compareVersions('1.9.0', '1.10.0') < 0, true)
   assert.equal(compareVersions('2.0.0', '1.10.0') > 0, true)
+})
+
+test('allows valid and unsigned Windows installers but rejects invalid signature states', () => {
+  assert.equal(classifyWindowsAuthenticodeStatus('Valid'), 'valid')
+  assert.equal(classifyWindowsAuthenticodeStatus(' NotSigned\r\n'), 'unsigned')
+  assert.equal(classifyWindowsAuthenticodeStatus('HashMismatch'), 'invalid')
+  assert.equal(classifyWindowsAuthenticodeStatus('NotTrusted'), 'invalid')
+  assert.equal(classifyWindowsAuthenticodeStatus(''), 'invalid')
 })

@@ -1,15 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  LinearProgress,
-  Paper,
-  Stack,
-  Typography,
-} from '@mui/material'
-import { Download, OpenInNew, Refresh } from '@mui/icons-material'
+import { Download, ExternalLink, RefreshCw } from 'lucide-react'
+import { AlertBanner, Badge, Button, ProgressBar } from '../components/ui'
 
 function formatSpeed(bytes: number): string {
   if (bytes < 1024) return `${bytes} B/s`
@@ -27,19 +18,11 @@ export function JavaManagerPage() {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
-  const primaryPackage = useMemo(() => packages.find((item) => item.recommended) || null, [packages])
-  const secondaryPackages = useMemo(() => packages.filter((item) => !item.recommended), [packages])
+  const primaryPackage = useMemo(() => packages.find(item => item.recommended) || null, [packages])
+  const secondaryPackages = useMemo(() => packages.filter(item => !item.recommended), [packages])
 
-  useEffect(() => {
-    const unsubscribe = window.electronAPI.onJavaDownloadProgress((progress) => {
-      setDownloadProgress(progress)
-    })
-    return unsubscribe
-  }, [])
-
-  useEffect(() => {
-    void loadData()
-  }, [])
+  useEffect(() => window.electronAPI.onJavaDownloadProgress(setDownloadProgress), [])
+  useEffect(() => { void loadData() }, [])
 
   async function loadData() {
     setLoading(true)
@@ -68,8 +51,7 @@ export function JavaManagerPage() {
     try {
       const result = await window.electronAPI.downloadJavaPackage(packageId)
       setSuccessMessage(`下载完成，已打开安装包：${result.filePath}`)
-      const latestJava = await window.electronAPI.detectJava()
-      setJavaInfo(latestJava)
+      setJavaInfo(await window.electronAPI.detectJava())
     } catch (downloadError: any) {
       setError(downloadError?.message || '下载 Java 失败')
     } finally {
@@ -78,139 +60,84 @@ export function JavaManagerPage() {
     }
   }
 
+  function packageBadges(item: JavaDownloadPackage) {
+    return (
+      <div className="config-summary__meta">
+        <Badge>{item.format}</Badge>
+        <Badge>{item.architecture}</Badge>
+        <Badge tone={item.native ? 'success' : 'warning'}>{item.native ? '原生架构' : '兼容模式'}</Badge>
+        <Badge>{item.fileName}</Badge>
+      </div>
+    )
+  }
+
   return (
-    <Box>
-      <Typography variant="h4" fontWeight={700} gutterBottom>
-        Java 管理
-      </Typography>
+    <div className="page-stack">
+      <section className="page-heading">
+        <div className="page-heading__copy">
+          <h1 className="page-heading__title">Java 环境</h1>
+        </div>
+        <div className="toolbar__group">
+          <Button variant="secondary" startIcon={<RefreshCw />} onClick={() => void loadData()} loading={loading}>重新检测</Button>
+          <Button variant="ghost" startIcon={<ExternalLink />} onClick={() => void window.electronAPI.openExternal(officialPage)} disabled={!officialPage}>官方页面</Button>
+        </div>
+      </section>
 
-      <Stack spacing={3}>
-        <Paper sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Box>
-              <Typography variant="h6" fontWeight={700} gutterBottom>
-                当前 Java 环境
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {loading
-                  ? '检测中...'
-                  : javaInfo
-                    ? `${javaInfo.version} · ${javaInfo.path}`
-                    : '未检测到 Java'}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              <Button variant="outlined" startIcon={<Refresh />} onClick={() => void loadData()}>
-                重新检测
-              </Button>
-              <Button
-                variant="text"
-                startIcon={<OpenInNew />}
-                onClick={() => void window.electronAPI.openExternal(officialPage)}
-                disabled={!officialPage}
-              >
-                打开官方页
-              </Button>
-            </Box>
-          </Box>
+      <div className="home-status">
+        <div className="summary-line">
+          <span>当前环境</span>
+          <Badge tone={javaInfo ? 'success' : 'warning'}>{loading ? '检测中' : javaInfo ? javaInfo.version : '未检测到'}</Badge>
+        </div>
+        <span className="inline-meta mono">{javaInfo?.path || '未配置 Java 路径'}</span>
+      </div>
 
-          {!loading && !javaInfo && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              当前未检测到 Java。你可以先下载并安装 Java 21，安装完成后回到这里点击“重新检测”。
-            </Alert>
-          )}
-        </Paper>
+      {!loading && !javaInfo ? <AlertBanner tone="warning">未检测到 Java 21</AlertBanner> : null}
+      {error ? <AlertBanner tone="danger">{error}</AlertBanner> : null}
+      {successMessage ? <AlertBanner tone="success">{successMessage}</AlertBanner> : null}
 
-        {error && <Alert severity="error">{error}</Alert>}
-        {successMessage && <Alert severity="success">{successMessage}</Alert>}
+      {downloadingId ? (
+        <section className="stack stack--compact">
+          <div className="summary-line">
+            <strong>{downloadProgress?.fileName || '正在准备下载...'}</strong>
+            {downloadProgress ? <span>{downloadProgress.percent}% · {formatSpeed(downloadProgress.speed)}</span> : null}
+          </div>
+          <ProgressBar indeterminate={!downloadProgress} value={downloadProgress?.percent} />
+        </section>
+      ) : null}
 
-        {downloadingId && downloadProgress && (
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" fontWeight={700} gutterBottom>
-              正在下载
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {downloadProgress.fileName} · {downloadProgress.percent}% · {formatSpeed(downloadProgress.speed)}
-            </Typography>
-            <LinearProgress variant="determinate" value={downloadProgress.percent} />
-          </Paper>
-        )}
+      {primaryPackage ? (
+        <section className="section-stack">
+          <div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">推荐下载</h2></div></div>
+          <div className="list-section">
+            <div className="list-row">
+              <div className="list-row__main stack stack--compact">
+                <div><strong>{primaryPackage.title}</strong></div>
+                {packageBadges(primaryPackage)}
+              </div>
+              <Button startIcon={<Download />} onClick={() => void handleDownload(primaryPackage.id)} loading={downloadingId === primaryPackage.id} disabled={Boolean(downloadingId) && downloadingId !== primaryPackage.id}>下载并打开</Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
-        {primaryPackage && (
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" fontWeight={700} gutterBottom>
-              推荐下载
-            </Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Box>
-                <Typography variant="h6">{primaryPackage.title}</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  {primaryPackage.description}
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                  <Chip size="small" color="primary" label="Java 21 LTS" />
-                  <Chip size="small" label={primaryPackage.format} />
-                  <Chip size="small" label={primaryPackage.architecture} />
-                  <Chip size="small" color="success" variant="outlined" label="原生架构" />
-                  <Chip size="small" label={primaryPackage.fileName} />
-                </Box>
-              </Box>
-              <Button
-                variant="contained"
-                size="large"
-                startIcon={<Download />}
-                onClick={() => void handleDownload(primaryPackage.id)}
-                disabled={Boolean(downloadingId)}
-              >
-                {downloadingId === primaryPackage.id ? '下载中...' : '下载并打开'}
-              </Button>
-            </Box>
-          </Paper>
-        )}
+      {secondaryPackages.length ? (
+        <section className="section-stack">
+          <div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">其他下载方式</h2></div></div>
+          <div className="list-section">
+            {secondaryPackages.map(item => (
+              <div className="list-row" key={item.id}>
+                <div className="list-row__main stack stack--compact">
+                  <div><strong>{item.title}</strong></div>
+                  {packageBadges(item)}
+                </div>
+                <Button variant="secondary" startIcon={<Download />} onClick={() => void handleDownload(item.id)} loading={downloadingId === item.id} disabled={Boolean(downloadingId) && downloadingId !== item.id}>下载</Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
-        {secondaryPackages.length > 0 && (
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" fontWeight={700} gutterBottom>
-              {primaryPackage ? '其他下载方式' : '兼容下载方式'}
-            </Typography>
-            <Stack spacing={2}>
-              {secondaryPackages.map((item) => (
-                <Box key={item.id} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="subtitle1" fontWeight={700}>{item.title}</Typography>
-                    <Typography variant="body2" color="text.secondary">{item.description}</Typography>
-                    <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                      <Chip size="small" label={item.format} />
-                      <Chip size="small" label={item.architecture} />
-                      <Chip
-                        size="small"
-                        color={item.native ? 'success' : 'warning'}
-                        variant="outlined"
-                        label={item.native ? '原生架构' : '兼容模式'}
-                      />
-                      <Chip size="small" label={item.fileName} />
-                    </Box>
-                  </Box>
-                  <Button
-                    variant="outlined"
-                    startIcon={<Download />}
-                    onClick={() => void handleDownload(item.id)}
-                    disabled={Boolean(downloadingId)}
-                  >
-                    {downloadingId === item.id ? '下载中...' : item.native ? '下载' : '下载兼容包'}
-                  </Button>
-                </Box>
-              ))}
-            </Stack>
-          </Paper>
-        )}
-
-        {!loading && packages.length === 0 && (
-          <Alert severity="warning">
-            当前系统或处理器架构没有可自动匹配的 Oracle Java 21 安装包，请使用“打开官方页”查看支持情况。
-          </Alert>
-        )}
-      </Stack>
-    </Box>
+      {!loading && packages.length === 0 ? <AlertBanner tone="warning">没有匹配的安装包</AlertBanner> : null}
+    </div>
   )
 }

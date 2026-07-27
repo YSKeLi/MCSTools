@@ -7,6 +7,9 @@ files:
   - dist/renderer/**/*
   - package.json
   - "!dist/**/*.map"
+extraResources:
+  - from: public/icons/app-icon.png
+    to: app-icon.png
 icon: public/icons/app-icon.png
 win:
   artifactName: MCServerTools-Windows-${arch}.${ext}

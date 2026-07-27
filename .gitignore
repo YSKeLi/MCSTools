@@ -1,10 +1,38 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 release/
-.runtime/
-Cloudserver.md
 .vite/
+
+# Local runtime/download cache
+.runtime/
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.codex-*.log
+
+# Local-only notes and environment
+Cloudserver.md
+.env
+.env.*
+!.env.example
+
+# Generated media/captures
+/output*.mp4
+/output*.webm
+/output*.mov
+
+# OS/editor files
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+
+# Legacy local helper copied outside scripts/
 /push.sh

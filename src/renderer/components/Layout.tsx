@@ -1,103 +1,132 @@
 import React from 'react'
-import {
-  AppBar,
-  Box,
-  Drawer,
-  IconButton,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Toolbar,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import {
-  CloudQueue as CloudIcon,
-  DarkMode,
-  Dashboard as ServerIcon,
-  Memory as JavaIcon,
-  Dns as CoreIcon,
-  Home as HomeIcon,
-  Info as InfoIcon,
-  LightMode,
-  Settings as SettingsIcon,
-  SettingsEthernet as FrpIcon,
-} from '@mui/icons-material'
+import { ArrowLeft, Boxes, ChevronRight, Cloud, Coffee, Home, Info, Moon, Network, Server, Settings, Sun } from 'lucide-react'
 import { Page } from '../App'
 
-const DRAWER_WIDTH = 220
+type NavItem = { id: Page; label: string; icon: React.ReactNode }
 
-const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
-  { id: 'home', label: '\u9996\u9875', icon: <HomeIcon /> },
-  { id: 'cores', label: '\u6838\u5FC3\u9009\u62E9', icon: <CoreIcon /> },
-  { id: 'cloud', label: '\u4E91\u670D\u52A1\u5668\u7BA1\u7406', icon: <CloudIcon /> },
-  { id: 'server', label: '\u672C\u5730\u670D\u52A1\u5668\u7BA1\u7406', icon: <ServerIcon /> },
-  { id: 'frp', label: 'FRP \u8BBE\u7F6E', icon: <FrpIcon /> },
-  { id: 'java', label: 'Java \u7BA1\u7406', icon: <JavaIcon /> },
-  { id: 'settings', label: '\u8BBE\u7F6E', icon: <SettingsIcon /> },
-  { id: 'about', label: '\u5173\u4E8E', icon: <InfoIcon /> },
+const workspaceItems: NavItem[] = [
+  { id: 'home', label: '首页', icon: <Home /> },
+  { id: 'cores', label: '核心下载', icon: <Boxes /> },
+  { id: 'cloud', label: '云服务器', icon: <Cloud /> },
+  { id: 'server', label: '本地服务器', icon: <Server /> },
+  { id: 'frp', label: 'FRP 穿透', icon: <Network /> },
+  { id: 'java', label: 'Java 管理', icon: <Coffee /> },
 ]
+
+const systemItems: NavItem[] = [
+  { id: 'settings', label: '设置', icon: <Settings /> },
+  { id: 'about', label: '关于', icon: <Info /> },
+]
+
+const navItems = [...workspaceItems, ...systemItems]
 
 interface Props {
   page: Page
   onPageChange: (page: Page) => void
+  onExitSettings: () => void
+  onExitCloudServer: () => void
   darkMode: boolean
   onToggleDark: () => void
   children: React.ReactNode
 }
 
-export function Layout({ page, onPageChange, darkMode, onToggleDark, children }: Props) {
-  const theme = useTheme()
+function NavGroup({ label, items, page, onPageChange }: { label: string; items: NavItem[]; page: Page; onPageChange: (page: Page) => void }) {
+  return (
+    <div className="app-nav__group">
+      <span className="app-nav__group-label">{label}</span>
+      <div className="app-nav__items">
+        {items.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            className={`app-nav__button${page === item.id ? ' app-nav__button--active' : ''}`}
+            onClick={() => onPageChange(item.id)}
+            title={item.label}
+          >
+            <span className="app-nav__icon" aria-hidden="true">{item.icon}</span>
+            <span className="app-nav__label">{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function Layout({ page, onPageChange, onExitSettings, onExitCloudServer, darkMode, onToggleDark, children }: Props) {
+  const currentItem = navItems.find(item => item.id === page)
+
+  if (page === 'settings' || page === 'cloud-detail') {
+    const isSettings = page === 'settings'
+    return (
+      <div className="settings-shell">
+        <header className="settings-shell__header">
+          <button
+            type="button"
+            className="settings-shell__back"
+            onClick={isSettings ? onExitSettings : onExitCloudServer}
+            aria-label="返回"
+            title="返回"
+          >
+            <ArrowLeft aria-hidden="true" />
+          </button>
+          <h1 className="settings-shell__title">{isSettings ? '设置' : '云服务器管理'}</h1>
+        </header>
+        <main className="settings-shell__main">{children}</main>
+      </div>
+    )
+  }
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh' }}>
-      <AppBar
-        position="fixed"
-        sx={{
-          zIndex: theme.zIndex.drawer + 1,
-          bgcolor: theme.palette.background.paper,
-          color: theme.palette.text.primary,
-          boxShadow: theme.shadows[4],
-        }}
-        elevation={0}
-      >
-        <Toolbar>
-          <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
-            {'Minecraft \u670D\u52A1\u5668\u642D\u5EFA\u5DE5\u5177'}
-          </Typography>
-          <IconButton color="inherit" onClick={onToggleDark}>
-            {darkMode ? <LightMode /> : <DarkMode />}
-          </IconButton>
-        </Toolbar>
-      </AppBar>
+    <div className="app-shell">
+      <aside className="app-sidebar">
+        <div className="app-brand">
+          <img className="app-brand__logo" src="/icons/app-icon.png" alt="" />
+          <div className="app-brand__copy">
+            <h1 className="app-brand__title">MC Server Tools</h1>
+          </div>
+        </div>
 
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: DRAWER_WIDTH,
-          flexShrink: 0,
-          '& .MuiDrawer-paper': { width: DRAWER_WIDTH, boxSizing: 'border-box' },
-        }}
-      >
-        <Toolbar />
-        <List sx={{ pt: 1 }}>
-          {navItems.map(item => (
-            <ListItem key={item.id} disablePadding>
-              <ListItemButton selected={page === item.id} onClick={() => onPageChange(item.id)}>
-                <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            </ListItem>
-          ))}
-        </List>
-      </Drawer>
+        <nav className="app-nav" aria-label="主导航">
+          <NavGroup label="工作台" items={workspaceItems} page={page} onPageChange={onPageChange} />
+          <NavGroup label="系统" items={systemItems} page={page} onPageChange={onPageChange} />
+        </nav>
 
-      <Box component="main" sx={{ flexGrow: 1, p: 3, overflow: 'auto' }}>
-        <Toolbar />
+        <div className="app-sidebar__footer">
+          <div className="app-theme-switch" aria-label="外观模式">
+            <button
+              type="button"
+              className={!darkMode ? 'app-theme-switch__button app-theme-switch__button--active' : 'app-theme-switch__button'}
+              onClick={() => darkMode && onToggleDark()}
+              aria-label="浅色模式"
+              title="浅色模式"
+            >
+              <Sun />
+            </button>
+            <button
+              type="button"
+              className={darkMode ? 'app-theme-switch__button app-theme-switch__button--active' : 'app-theme-switch__button'}
+              onClick={() => !darkMode && onToggleDark()}
+              aria-label="深色模式"
+              title="深色模式"
+            >
+              <Moon />
+            </button>
+          </div>
+          <span className="app-sidebar__mode">Local</span>
+        </div>
+      </aside>
+
+      <main className="app-main">
+        <header className="app-topbar">
+          <div className="app-topbar__breadcrumb">
+            <span className="app-topbar__dot" aria-hidden="true" />
+            <span>MCST</span>
+            <ChevronRight aria-hidden="true" />
+            <strong>{currentItem?.label || '控制台'}</strong>
+          </div>
+        </header>
         {children}
-      </Box>
-    </Box>
+      </main>
+    </div>
   )
 }

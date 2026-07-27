@@ -1,49 +1,31 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react'
-import {
-  Box, Typography, Paper, Button, TextField, Chip, Select, MenuItem,
-  Tabs, Tab, Slider, Alert, IconButton, FormControl, InputLabel, Switch,
-  FormControlLabel, Grid, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
-} from '@mui/material'
-import { PlayArrow, Stop, Send, Delete, Add, PowerSettingsNew } from '@mui/icons-material'
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react'
+import { Play, Plus, Power, Send, Square, Trash2 } from 'lucide-react'
 import { LocalSystemMetrics } from '../components/LocalSystemMetrics'
+import { OnlinePlayers } from '../components/OnlinePlayers'
+import { AlertBanner, Badge, Button, Dialog, Field, IconButton, Toggle } from '../components/ui'
 import { PROP_MAP, parseProperties, serializeProperties } from '../propertiesMapping'
 import { parseServerProfile } from '../serverProfile'
 import type { PropField } from '../propertiesMapping'
 
-function PropFieldWidget({ key: propKey, value, field, onChange }: {
-  key: string; value: string; field: PropField; onChange: (key: string, val: string) => void
+function PropFieldWidget({ propKey, value, field, onChange }: {
+  propKey: string; value: string; field: PropField; onChange: (key: string, val: string) => void
 }) {
   if (field.type === 'bool') {
-    return (
-      <FormControlLabel
-        control={<Switch checked={value === 'true'} onChange={(e) => onChange(propKey, e.target.checked ? 'true' : 'false')} />}
-        label={field.label}
-      />
-    )
+    return <Toggle checked={value === 'true'} onChange={checked => onChange(propKey, checked ? 'true' : 'false')} label={field.label} />
   }
   if (field.type === 'enum') {
     return (
-      <FormControl fullWidth size="small">
-        <InputLabel>{field.label}</InputLabel>
-        <Select value={value} label={field.label} onChange={e => onChange(propKey, e.target.value)}>
-          {field.options?.map(o => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-        </Select>
-      </FormControl>
-    )
-  }
-  if (field.type === 'number') {
-    return (
-      <TextField
-        label={field.label} type="number" value={value} size="small" fullWidth
-        onChange={e => onChange(propKey, e.target.value)}
-      />
+      <Field label={field.label}>
+        <select className="ui-select" value={value} onChange={event => onChange(propKey, event.target.value)}>
+          {field.options?.map(option => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </Field>
     )
   }
   return (
-    <TextField
-      label={field.label} value={value} size="small" fullWidth
-      onChange={e => onChange(propKey, e.target.value)}
-    />
+    <Field label={field.label}>
+      <input className="ui-input" type={field.type === 'number' ? 'number' : 'text'} value={value} onChange={event => onChange(propKey, event.target.value)} />
+    </Field>
   )
 }
 
@@ -54,16 +36,42 @@ function joinPath(...parts: string[]) {
     .join('/')
 }
 
+function mergeLogHistory(history: string[], live: string[], limit = 500): string[] {
+  if (!live.length) return history.slice(-limit)
+  if (!history.length) return live.slice(-limit)
+
+  const findOverlap = (older: string[], newer: string[]) => {
+    let overlap = Math.min(older.length, newer.length)
+    while (overlap > 0) {
+      const olderStart = older.length - overlap
+      if (older.slice(olderStart).every((line, index) => line === newer[index])) return overlap
+      overlap -= 1
+    }
+    return 0
+  }
+
+  const historyThenLive = findOverlap(history, live)
+  const liveThenHistory = findOverlap(live, history)
+  if (liveThenHistory > historyThenLive) {
+    return [...live, ...history.slice(liveThenHistory)].slice(-limit)
+  }
+  if (historyThenLive > 0) {
+    return [...history, ...live.slice(historyThenLive)].slice(-limit)
+  }
+  return history.slice(-limit)
+}
+
 export function ServerPage({ active }: { active: boolean }) {
   const [runtimeState, setRuntimeState] = useState<ServerRuntimeState>({ serverId: null, status: 'stopped' })
+  const [playerSnapshot, setPlayerSnapshot] = useState<ServerPlayerSnapshot>({ serverId: null, players: [] })
   const [logsByServer, setLogsByServer] = useState<Record<string, string[]>>({})
   const [cmd, setCmd] = useState('')
   const [tab, setTab] = useState(0)
   const [maxRam, setMaxRam] = useState(2048)
   const [servers, setServers] = useState<ServerEntry[]>([])
   const [currentId, setCurrentId] = useState<string>('')
-  const logEndRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const terminalRef = useRef<HTMLDivElement>(null)
+  const followLatestLogsRef = useRef(true)
 
   const [propsText, setPropsText] = useState('')
   const [propsMap, setPropsMap] = useState<Record<string, string>>({})
@@ -83,7 +91,22 @@ export function ServerPage({ active }: { active: boolean }) {
 
   const current = servers.find(s => s.id === currentId)
   const status = runtimeState.serverId === currentId ? runtimeState.status : 'stopped'
+  const managedProcessActive = ['starting', 'running', 'stopping'].includes(status)
+  const externalRunning = status === 'external'
+  const processActive = managedProcessActive || externalRunning
+  const statusLabel = status === 'running'
+    ? '运行中'
+    : status === 'external'
+      ? '运行中'
+      : status === 'starting'
+        ? '启动中'
+        : status === 'stopping'
+          ? '停止中'
+          : status === 'error'
+            ? '错误'
+            : '未运行'
   const logs = currentId ? logsByServer[currentId] || [] : []
+  const onlinePlayers = playerSnapshot.serverId === currentId ? playerSnapshot.players : []
 
   useEffect(() => {
     if (!window.electronAPI?.onServerLog) return
@@ -96,10 +119,12 @@ export function ServerPage({ active }: { active: boolean }) {
       }))
     })
     const unsubStatus = window.electronAPI.onServerStatus(setRuntimeState)
+    const unsubPlayers = window.electronAPI.onServerPlayers(setPlayerSnapshot)
     const unsubServersChanged = window.electronAPI.onServersChanged(() => { loadServers() })
     void window.electronAPI.getServerStatus().then(setRuntimeState)
+    void window.electronAPI.getServerPlayers().then(setPlayerSnapshot)
     loadServers()
-    return () => { unsubLog(); unsubStatus(); unsubServersChanged() }
+    return () => { unsubLog(); unsubStatus(); unsubPlayers(); unsubServersChanged() }
   }, [])
 
   useEffect(() => {
@@ -107,7 +132,38 @@ export function ServerPage({ active }: { active: boolean }) {
     loadServers()
   }, [active])
 
-  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs])
+  useEffect(() => {
+    if (
+      runtimeState.serverId
+      && ['starting', 'running', 'stopping', 'external'].includes(runtimeState.status)
+      && servers.some(server => server.id === runtimeState.serverId)
+    ) setCurrentId(runtimeState.serverId)
+  }, [runtimeState.serverId, runtimeState.status, servers])
+
+  useLayoutEffect(() => {
+    followLatestLogsRef.current = true
+    const terminal = terminalRef.current
+    if (!terminal) return undefined
+    const scrollToLatest = () => { terminal.scrollTop = terminal.scrollHeight }
+    scrollToLatest()
+    const frame = window.requestAnimationFrame(scrollToLatest)
+    return () => window.cancelAnimationFrame(frame)
+  }, [currentId, tab])
+
+  useLayoutEffect(() => {
+    if (!followLatestLogsRef.current) return undefined
+    const terminal = terminalRef.current
+    if (!terminal) return undefined
+    const scrollToLatest = () => { terminal.scrollTop = terminal.scrollHeight }
+    scrollToLatest()
+    const frame = window.requestAnimationFrame(scrollToLatest)
+    return () => window.cancelAnimationFrame(frame)
+  }, [logs])
+
+  function handleTerminalScroll(event: React.UIEvent<HTMLDivElement>) {
+    const terminal = event.currentTarget
+    followLatestLogsRef.current = terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop <= 32
+  }
 
   async function loadServers() {
     const list = await window.electronAPI.serversList()
@@ -126,6 +182,38 @@ export function ServerPage({ active }: { active: boolean }) {
     setMaxRam(current.maxRam)
     void loadProperties()
   }, [currentId])
+
+  useEffect(() => {
+    if (!active || !currentId) return undefined
+    const serverId = currentId
+    let disposed = false
+    let timer: number | undefined
+
+    const refreshRuntime = async () => {
+      try {
+        const [state, history] = await Promise.all([
+          window.electronAPI.getServerStatus(serverId),
+          window.electronAPI.getServerLogs(serverId),
+        ])
+        if (disposed) return
+        setRuntimeState(state)
+        setLogsByServer(previous => ({
+          ...previous,
+          [serverId]: mergeLogHistory(history, previous[serverId] || []),
+        }))
+      } catch {
+        // Keep the last known state during a transient process-query failure.
+      } finally {
+        if (!disposed) timer = window.setTimeout(refreshRuntime, 3000)
+      }
+    }
+
+    void refreshRuntime()
+    return () => {
+      disposed = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [active, currentId])
 
   const loadProperties = useCallback(async () => {
     if (!current) return
@@ -190,21 +278,28 @@ export function ServerPage({ active }: { active: boolean }) {
   }, [current, maxRam])
 
   const handleStop = useCallback(async () => {
-    if (current) await window.electronAPI.stopServer(current.id)
+    if (!current) return
+    setJavaError('')
+    try { await window.electronAPI.stopServer(current.id) }
+    catch (error: any) { setJavaError(error?.message || '服务器停止失败') }
   }, [current])
   const handleForceStop = useCallback(async () => {
-    if (current) await window.electronAPI.forceStopServer(current.id)
+    if (!current) return
+    setJavaError('')
+    try { await window.electronAPI.forceStopServer(current.id) }
+    catch (error: any) { setJavaError(error?.message || '服务器强制停止失败') }
   }, [current])
 
   const handleCommand = useCallback(async () => {
     if (!cmd.trim()) return
     if (!current) return
-    await window.electronAPI.sendServerCommand(current.id, cmd.trim())
-    setLogsByServer(previous => ({
-      ...previous,
-      [current.id]: [...(previous[current.id] || []).slice(-500), `> ${cmd}`],
-    }))
-    setCmd('')
+    setJavaError('')
+    try {
+      await window.electronAPI.sendServerCommand(current.id, cmd.trim())
+      setCmd('')
+    } catch (error: any) {
+      setJavaError(error?.message || '服务器命令发送失败')
+    }
   }, [cmd, current])
 
   const handleDeleteOpen = useCallback(() => {
@@ -290,214 +385,100 @@ export function ServerPage({ active }: { active: boolean }) {
 
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter') handleCommand() }
 
-  const statusColor = { running: 'success', starting: 'warning', stopped: 'default', error: 'error' } as const
-
   return (
-    <Box>
-      <Typography variant="h4" fontWeight={700} gutterBottom>本地服务器管理</Typography>
+    <div className="page-stack">
+      <section className="page-heading">
+        <div className="page-heading__copy"><h1 className="page-heading__title">本地服务器</h1></div>
+        <Button variant="secondary" startIcon={<Plus />} onClick={handleAddOpen}>添加已有服务器</Button>
+      </section>
 
-      <LocalSystemMetrics active={active} />
+      <section className="section-stack">
+        <div className="toolbar">
+          <div className="toolbar__group">
+            <select className="ui-select server-picker" value={currentId} onChange={event => setCurrentId(event.target.value)}>
+              {!servers.length ? <option value="">暂无已保存的服务器</option> : null}
+              {servers.map(server => <option key={server.id} value={server.id}>{server.name} ({server.coreName} {server.version})</option>)}
+            </select>
+            {current ? <Badge tone={status === 'running' || status === 'external' ? 'success' : status === 'starting' ? 'warning' : status === 'error' ? 'danger' : 'neutral'}>{statusLabel}</Badge> : null}
+          </div>
+          {current ? (
+            <div className="toolbar__group">
+              <div className="range-control">
+                <span className="range-control__value">内存 {maxRam} MB</span>
+                <input type="range" value={maxRam} onChange={event => setMaxRam(Number(event.target.value))} onMouseUp={event => void window.electronAPI.serversUpdate(current.id, { maxRam: Number(event.currentTarget.value) })} min={512} max={16384} step={256} />
+              </div>
+              {processActive ? <Button variant="danger" size="sm" startIcon={<Square />} onClick={handleStop} disabled={status === 'stopping'}>{status === 'stopping' ? '停止中' : '停止'}</Button> : <Button size="sm" startIcon={<Play />} onClick={handleStart}>启动</Button>}
+              {processActive ? <IconButton tone="danger" onClick={handleForceStop} title="强制结束进程" aria-label="强制结束进程"><Power /></IconButton> : null}
+              <IconButton tone="danger" onClick={handleDeleteOpen} disabled={processActive} title={processActive ? '请先停止服务器' : '移除服务器'} aria-label="移除服务器"><Trash2 /></IconButton>
+            </div>
+          ) : null}
+        </div>
 
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-          <FormControl size="small" sx={{ minWidth: 240 }}>
-            <InputLabel>选择服务器</InputLabel>
-            <Select value={currentId} label="选择服务器" onChange={e => setCurrentId(e.target.value)}>
-              {servers.map(s => <MenuItem key={s.id} value={s.id}>{s.name} ({s.coreName} {s.version})</MenuItem>)}
-              {servers.length === 0 && <MenuItem disabled>暂无已保存的服务器</MenuItem>}
-            </Select>
-          </FormControl>
-          <Button variant="outlined" size="small" startIcon={<Add />} onClick={handleAddOpen}>添加已有服务器</Button>
+        {current ? (
+          <div className="config-summary stack stack--compact">
+            <p className="config-summary__path">{current.path}</p>
+            <div className="toolbar__group"><span className="inline-meta">Java: {current.javaPath || '自动检测'}</span><Button variant="link" size="sm" onClick={handleSelectJava}>选择 Java</Button>{current.javaPath ? <Button variant="link" size="sm" onClick={handleClearJava}>恢复自动检测</Button> : null}</div>
+            {javaError ? <AlertBanner tone="warning">{javaError}</AlertBanner> : null}
+          </div>
+        ) : null}
+      </section>
 
-          {current && (
-            <>
-              <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1 }}>
-                {current.path}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>内存: {maxRam} MB</Typography>
-                <Slider
-                  value={maxRam}
-                  onChange={(_, value) => setMaxRam(value as number)}
-                  onChangeCommitted={(_, value) => current && void window.electronAPI.serversUpdate(current.id, { maxRam: value as number })}
-                  min={512}
-                  max={16384}
-                  step={256}
-                  sx={{ width: 120 }}
-                />
-              </Box>
-              <Chip label={`状态: ${status}`} size="small" color={statusColor[status as keyof typeof statusColor] || 'default'} />
-              {status === 'running' ? (
-                <>
-                  <Button variant="contained" color="error" size="small" startIcon={<Stop />} onClick={handleStop}>停止</Button>
-                  <Tooltip title="强制结束进程">
-                    <IconButton color="error" size="small" onClick={handleForceStop}><PowerSettingsNew /></IconButton>
-                  </Tooltip>
-                </>
-              ) : (
-                <Button variant="contained" size="small" startIcon={<PlayArrow />} onClick={handleStart}>启动</Button>
-              )}
-              <Tooltip title="移除服务器">
-                <IconButton color="error" size="small" onClick={handleDeleteOpen}><Delete /></IconButton>
-              </Tooltip>
-            </>
-          )}
-        </Box>
-        {current && (
-          <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Typography variant="body2" color="text.secondary">
-                Java: {current.javaPath || '自动检测'}
-              </Typography>
-              <Button variant="text" size="small" onClick={handleSelectJava}>选择 Java</Button>
-              {current.javaPath && <Button variant="text" size="small" color="inherit" onClick={handleClearJava}>恢复自动检测</Button>}
-            </Box>
-            {javaError && <Alert severity="warning">{javaError}</Alert>}
-          </Box>
-        )}
-      </Paper>
+      {!current ? <div className="empty-state"><div className="empty-state__content"><h2 className="empty-state__title">还没有本地服务器</h2><Button startIcon={<Plus />} onClick={handleAddOpen}>添加已有服务器</Button></div></div> : null}
 
-      {current && (
-        <>
-          <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-            <Tab label="日志" />
-            <Tab label="控制台" />
-            <Tab label="配置" />
-          </Tabs>
+      {current ? (
+        <section className="section-stack">
+          <div className="ui-tabs" role="tablist">
+            {['日志', '控制台', '配置'].map((label, index) => <button key={label} className={`ui-tab${tab === index ? ' ui-tab--active' : ''}`} onClick={() => setTab(index)} role="tab" aria-selected={tab === index}>{label}</button>)}
+          </div>
 
-          {tab === 0 && (
-            <Paper
-              ref={containerRef}
-              sx={{
-                height: 400, overflow: 'auto', p: 2, fontFamily: 'Consolas, monospace',
-                fontSize: 13, bgcolor: '#1a1a1a', color: '#e0e0e0',
-                '&::-webkit-scrollbar': { width: 8 },
-                '&::-webkit-scrollbar-thumb': { bgcolor: '#555', borderRadius: 4 },
-              }}
-            >
-              {logs.length === 0 && <Typography sx={{ color: '#888' }}>启动服务器后日志将显示在此处</Typography>}
-              {logs.map((line, i) => (
-                <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{line}</div>
-              ))}
-              <div ref={logEndRef} />
-            </Paper>
-          )}
+          {tab === 0 ? (
+            <div className="terminal terminal--large" ref={terminalRef} onScroll={handleTerminalScroll}>
+              {logs.map((line, index) => <div className="terminal__line" key={index}>{line}</div>)}
+            </div>
+          ) : null}
 
-          {tab === 1 && (
-            <Box>
-              <Paper
-                sx={{
-                  height: 340, overflow: 'auto', mb: 1, p: 2, fontFamily: 'Consolas, monospace',
-                  fontSize: 13, bgcolor: '#1a1a1a', color: '#e0e0e0',
-                  '&::-webkit-scrollbar': { width: 8 },
-                  '&::-webkit-scrollbar-thumb': { bgcolor: '#555', borderRadius: 4 },
-                }}
-              >
-                {logs.length === 0 && <Typography sx={{ color: '#888' }}>启动服务器后在此输入命令</Typography>}
-                {logs.map((line, i) => (
-                  <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{line}</div>
-                ))}
-                <div ref={logEndRef} />
-              </Paper>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  fullWidth size="small"
-                  placeholder={status === 'running' ? '输入 Minecraft 命令...' : '等待服务器启动后可输入命令'}
-                  value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={handleKeyDown}
-                />
-                <IconButton color="primary" onClick={handleCommand} disabled={status !== 'running'}><Send /></IconButton>
-              </Box>
-            </Box>
-          )}
+          {tab === 1 ? (
+            <div className="stack stack--compact">
+              <div className="terminal" style={{ height: 330 }} ref={terminalRef} onScroll={handleTerminalScroll}>
+                {logs.map((line, index) => <div className="terminal__line" key={index}>{line}</div>)}
+              </div>
+              <div className="input-group"><input className="ui-input" placeholder="Minecraft 命令" value={cmd} onChange={event => setCmd(event.target.value)} onKeyDown={handleKeyDown} disabled={status !== 'running' && !externalRunning} /><IconButton tone="accent" onClick={handleCommand} disabled={status !== 'running' && !externalRunning} title="发送命令" aria-label="发送命令"><Send /></IconButton></div>
+            </div>
+          ) : null}
 
-          {tab === 2 && (
-            <Paper sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">服务器配置</Typography>
-                <Button variant="contained" size="small" onClick={handleSaveProperties}>保存配置</Button>
-              </Box>
-
-              {Object.keys(propsMap).length === 0 && (
-                <Alert severity="info">server.properties 文件未找到或为空，启动服务器后会自动生成。</Alert>
-              )}
-
-              <Grid container spacing={2}>
+          {tab === 2 ? (
+            <div className="section-stack">
+              <div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">服务器配置</h2><p className="section-heading__subtitle mono">{propsPath}</p></div>{Object.keys(propsMap).length ? <Button size="sm" onClick={handleSaveProperties}>保存配置</Button> : null}</div>
+              {!Object.keys(propsMap).length ? <AlertBanner tone="info">server.properties 文件未找到或为空</AlertBanner> : null}
+              <div className="properties-grid">
                 {Object.entries(propsMap).map(([key, val]) => {
                   const field = PROP_MAP[key as keyof typeof PROP_MAP]
                   if (!field) return null
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={key}>
-                      <Box sx={{ position: 'relative' }}>
-                        <PropFieldWidget key={key} value={val} field={field} onChange={handlePropChange} />
-                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: 'block' }}>
-                          {field.desc} ({key})
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  )
+                  return <div className="property-field" key={key}><PropFieldWidget propKey={key} value={val} field={field} onChange={handlePropChange} /></div>
                 })}
-              </Grid>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
-              {Object.keys(propsMap).length > 0 && (
-                <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button variant="contained" onClick={handleSaveProperties}>保存配置</Button>
-                </Box>
-              )}
-            </Paper>
-          )}
-        </>
-      )}
+      <OnlinePlayers hasServer={Boolean(current)} status={externalRunning ? 'running' : status} players={onlinePlayers} />
 
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>添加已有服务器</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            <TextField label="服务器名称" value={addName} onChange={e => setAddName(e.target.value)} fullWidth />
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField label="服务端目录" value={addDir} size="small" sx={{ flexGrow: 1 }} InputProps={{ readOnly: true }} />
-              <Button variant="outlined" onClick={handleAddPickDir}>选择目录</Button>
-            </Box>
-            <TextField label="JAR 文件名" value={addJar} onChange={e => setAddJar(e.target.value)} fullWidth size="small" helperText="服务端核心文件名称，如 server.jar 或 paper.jar" />
-            <TextField label="核心类型（可选）" value={addCoreName} onChange={e => setAddCoreName(e.target.value)} fullWidth size="small" helperText="如 Paper、Vanilla、Forge" />
-            <TextField label="版本（可选）" value={addVersion} onChange={e => setAddVersion(e.target.value)} fullWidth size="small" />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleAddConfirm} disabled={!addDir || !addName.trim()}>添加</Button>
-        </DialogActions>
+      <LocalSystemMetrics active={active} />
+
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} title="添加已有服务器" width="sm" footer={<div className="dialog-actions"><Button variant="ghost" onClick={() => setAddOpen(false)}>取消</Button><Button onClick={handleAddConfirm} disabled={!addDir || !addName.trim()}>添加</Button></div>}>
+        <div className="stack">
+          <Field label="服务器名称"><input className="ui-input" value={addName} onChange={event => setAddName(event.target.value)} /></Field>
+          <Field label="服务端目录"><div className="input-group"><input className="ui-input" value={addDir} readOnly /><Button variant="secondary" onClick={handleAddPickDir}>选择目录</Button></div></Field>
+          <Field label="JAR 文件名"><input className="ui-input" value={addJar} onChange={event => setAddJar(event.target.value)} /></Field>
+          <Field label="核心类型（可选）"><input className="ui-input" value={addCoreName} onChange={event => setAddCoreName(event.target.value)} /></Field>
+          <Field label="版本（可选）"><input className="ui-input" value={addVersion} onChange={event => setAddVersion(event.target.value)} /></Field>
+        </div>
       </Dialog>
 
-      <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>移除服务器</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            <Typography>
-              请选择如何处理「{current?.name || '当前服务器'}」。
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              服务器目录: {current?.path || '-'}
-            </Typography>
-            {deleteError && <Alert severity="error">{deleteError}</Alert>}
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3, justifyContent: 'space-between' }}>
-          <Button onClick={() => setDeleteOpen(false)}>取消</Button>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button variant="outlined" color="warning" onClick={() => void handleDeleteAction(false)}>
-              从列表中移除（不删除文件）
-            </Button>
-            <Button
-              variant="contained"
-              color="error"
-              onClick={() => void handleDeleteAction(true)}
-              disabled={!current?.managedPath}
-            >
-              从列表中移除并删除文件
-            </Button>
-          </Box>
-        </DialogActions>
+      <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} title="移除服务器" width="md" footer={<div className="dialog-actions"><Button variant="ghost" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="secondary" onClick={() => void handleDeleteAction(false)}>仅从列表移除</Button><Button variant="danger" onClick={() => void handleDeleteAction(true)} disabled={!current?.managedPath}>移除并删除文件</Button></div>}>
+        <div className="stack stack--compact"><p className="muted mono">{current?.path || '-'}</p>{deleteError ? <AlertBanner tone="danger">{deleteError}</AlertBanner> : null}{!current?.managedPath ? <AlertBanner tone="info">仅可从列表移除</AlertBanner> : null}</div>
       </Dialog>
-    </Box>
+    </div>
   )
 }

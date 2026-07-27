@@ -1,6 +1,6 @@
 {
   "name": "minecraft-server-tools",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Cross-platform Minecraft server toolkit.",
   "author": {
     "name": "YSKeLi",
@@ -11,24 +11,30 @@
     "type": "git",
     "url": "git+https://github.com/YSKeLi/MCSTools.git"
   },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "npm run build:main && concurrently -k \"tsc -p tsconfig.main.json --watch --preserveWatchOutput\" \"vite\" \"wait-on tcp:5173 && electron dist/main/index.js\"",
+    "prepare:electron": "node scripts/prepare-electron.cjs",
+    "postinstall": "npm run prepare:electron",
+    "dev": "npm run prepare:electron && npm run build:main && concurrently -k \"tsc -p tsconfig.main.json --watch --preserveWatchOutput\" \"vite\" \"wait-on tcp:5173 && electron dist/main/index.js\"",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "tsc -p tsconfig.main.json && vite build",
+    "verify": "npm run typecheck && npm test",
     "test": "npm run build:main && node --test tests/*.test.cjs",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run prepare:electron && npm run build && node scripts/run-electron-builder.cjs",
     "dist:win": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
     "dist:win:unsigned": "powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -AllowUnsigned",
     "audit": "npm audit --registry=https://registry.npmjs.org",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc --noEmit"
   },
   "dependencies": {
-    "@emotion/react": "^11.13.3",
-    "@emotion/styled": "^11.13.0",
-    "@mui/icons-material": "^5.16.7",
-    "@mui/material": "^5.16.7",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "lucide-react": "^1.26.0",
+    "opencc-js": "^1.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ssh2": "^1.17.0",
@@ -40,8 +46,8 @@
     "@types/ssh2": "^1.15.5",
     "@vitejs/plugin-react": "^4.3.2",
     "concurrently": "^8.2.2",
-    "electron": "^31.6.0",
-    "electron-builder": "^24.13.3",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.7",
     "typescript": "^5.5.4",
     "vite": "^5.4.8",
     "wait-on": "^8.0.1"

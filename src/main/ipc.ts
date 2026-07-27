@@ -9,11 +9,20 @@ import { detectJava, downloadJavaPackage, getJava21OfficialPage, getJava21Packag
 import { RemoteServerService } from './remote/RemoteServerService'
 import { assertManagedServerDirectory, normalizeFsPath, writeServerMarker } from './security/pathPolicy'
 import { ServerManager } from './server/ServerManager'
+import { PlayerSkinService } from './server/PlayerSkinService'
 import { getLocalSystemMetrics } from './system/SystemMetricsService'
 import { addServer, getServer, getServers, removeServer, updateServer } from './store'
+import {
+  clearBackgroundImage,
+  getAppSettingsView,
+  saveBackgroundImage,
+  updateAppSettings,
+} from './settings/AppSettingsStore'
+import type { AppSettings } from './settings/settingsPolicy'
 import { checkForUpdates, downloadAndInstallUpdate, getProjectVersion } from './update/UpdateService'
 
 const serverManager = new ServerManager()
+const playerSkinService = new PlayerSkinService()
 const frpManager = new FrpManager()
 const remoteServerService = new RemoteServerService()
 const approvedDirectories = new Set<string>()
@@ -22,6 +31,10 @@ const approvedFrpFiles = new Set<string>()
 const SERVER_PROFILE_FILE = 'profilemcsrv.toml'
 let currentWindow: BrowserWindow | null = null
 let ipcRegistered = false
+
+export interface AppSettingsActions {
+  onSettingsUpdated: (settings: AppSettings) => void
+}
 
 function windowOrThrow(): BrowserWindow {
   if (!currentWindow || currentWindow.isDestroyed()) throw new Error('应用窗口不可用')
@@ -62,7 +75,7 @@ function validateExternalUrl(rawUrl: string): string {
   return parsed.toString()
 }
 
-export function registerIpcHandlers(mainWindow: BrowserWindow) {
+export function registerIpcHandlers(mainWindow: BrowserWindow, settingsActions?: AppSettingsActions) {
   currentWindow = mainWindow
   serverManager.setWindow(mainWindow)
   frpManager.setWindow(mainWindow)
@@ -91,9 +104,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
   })
   ipcMain.handle('server:stop', (_event, id: string) => serverManager.stop(id))
   ipcMain.handle('server:forceStop', (_event, id: string) => serverManager.forceStop(id))
-  ipcMain.handle('server:status', () => serverManager.getState())
+  ipcMain.handle('server:status', (_event, id?: string) => (
+    id ? serverManager.getStateForServer(id) : serverManager.getState()
+  ))
+  ipcMain.handle('server:logs', (_event, id: string) => serverManager.getLogs(id))
+  ipcMain.handle('server:players', () => serverManager.getPlayerSnapshot())
+  ipcMain.handle('server:playerSkin', (_event, playerName: string) => playerSkinService.get(playerName))
   ipcMain.handle('server:command', (_event, id: string, command: string) => serverManager.sendCommand(id, command))
-  ipcMain.handle('system:getMetrics', () => getLocalSystemMetrics())
+  ipcMain.handle('system:getMetrics', (_event, options?: { refreshDisk?: boolean }) => (
+    getLocalSystemMetrics(options?.refreshDisk === true)
+  ))
 
   ipcMain.handle('servers:list', () => getServers())
   ipcMain.handle('servers:add', (_event, input) => {
@@ -115,10 +135,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     emit('servers:changed')
     return server
   })
-  ipcMain.handle('servers:remove', (_event, id: string, options?: { deleteFiles?: boolean }) => {
+  ipcMain.handle('servers:remove', async (_event, id: string, options?: { deleteFiles?: boolean }) => {
     const server = getServer(id)
     if (!server) return
-    const state = serverManager.getState()
+    const state = await serverManager.getStateForServer(id)
     if (state.serverId === id && state.status !== 'stopped' && state.status !== 'error') {
       throw new Error('请先停止该服务器')
     }
@@ -195,6 +215,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('frp:stop', () => frpManager.stop())
   ipcMain.handle('frp:status', () => frpManager.status)
+  ipcMain.handle('frp:logs', () => frpManager.logs)
   ipcMain.handle('frpConfigs:list', () => listFrpConfigs())
   ipcMain.handle('frpConfigs:pickFile', async () => {
     const result = await dialog.showOpenDialog(windowOrThrow(), {
@@ -225,7 +246,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     const config = getFrpConfig(id)
     if (!config) throw new Error('所选配置不存在')
     if (!fs.existsSync(config.filePath)) throw new Error('配置文件已不存在，请重新导入')
-    await frpManager.startFromFile(config.filePath)
+    await frpManager.startFromFile(config.filePath, id)
     markFrpConfigUsed(id)
     emit('frpConfigs:changed')
   })
@@ -241,6 +262,29 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
   })
 
   ipcMain.handle('app:getVersion', () => getProjectVersion())
+  ipcMain.handle('appSettings:get', () => getAppSettingsView())
+  ipcMain.handle('appSettings:update', (_event, patch: unknown) => {
+    const settings = updateAppSettings(patch)
+    settingsActions?.onSettingsUpdated(settings)
+    return getAppSettingsView(settings)
+  })
+  ipcMain.handle('appearance:selectBackgroundImage', async () => {
+    const result = await dialog.showOpenDialog(windowOrThrow(), {
+      properties: ['openFile'],
+      filters: [
+        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+      ],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const settings = saveBackgroundImage(result.filePaths[0])
+    settingsActions?.onSettingsUpdated(settings)
+    return getAppSettingsView(settings)
+  })
+  ipcMain.handle('appearance:clearBackgroundImage', () => {
+    const settings = clearBackgroundImage()
+    settingsActions?.onSettingsUpdated(settings)
+    return getAppSettingsView(settings)
+  })
   ipcMain.handle('app:checkForUpdates', () => checkForUpdates())
   ipcMain.handle('app:downloadAndInstallUpdate', () => downloadAndInstallUpdate(windowOrThrow()))
   ipcMain.handle('app:openExternal', (_event, url: string) => shell.openExternal(validateExternalUrl(url)))
@@ -250,6 +294,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('remoteServers:add', (_event, input) => remoteServerService.add(input))
   ipcMain.handle('remoteServers:remove', (_event, id: string) => remoteServerService.remove(id))
   ipcMain.handle('remoteServers:getMetrics', (_event, id: string) => remoteServerService.getMetrics(id))
+  ipcMain.handle('remoteMinecraft:list', (_event, remoteServerId: string) => remoteServerService.listMinecraftServers(remoteServerId))
+  ipcMain.handle('remoteMinecraft:findDirectories', (_event, remoteServerId: string) => remoteServerService.findMinecraftDirectories(remoteServerId))
+  ipcMain.handle('remoteMinecraft:inspectDirectory', (_event, remoteServerId: string, remotePath: string) => remoteServerService.inspectMinecraftDirectory(remoteServerId, remotePath))
+  ipcMain.handle('remoteMinecraft:browseDirectory', (_event, remoteServerId: string, remotePath?: string) => remoteServerService.browseDirectory(remoteServerId, remotePath))
+  ipcMain.handle('remoteMinecraft:add', (_event, remoteServerId: string, input) => remoteServerService.addMinecraftServer(remoteServerId, input))
+  ipcMain.handle('remoteMinecraft:remove', (_event, remoteServerId: string, minecraftServerId: string) => remoteServerService.removeMinecraftServer(remoteServerId, minecraftServerId))
+  ipcMain.handle('remoteMinecraft:update', (_event, remoteServerId: string, minecraftServerId: string, maxRam: number) => remoteServerService.updateMinecraftServer(remoteServerId, minecraftServerId, maxRam))
+  ipcMain.handle('remoteMinecraft:status', (_event, remoteServerId: string, minecraftServerId: string) => remoteServerService.getMinecraftServerStatus(remoteServerId, minecraftServerId))
+  ipcMain.handle('remoteMinecraft:logs', (_event, remoteServerId: string, minecraftServerId: string) => remoteServerService.getMinecraftServerLogs(remoteServerId, minecraftServerId))
+  ipcMain.handle('remoteMinecraft:start', (_event, remoteServerId: string, minecraftServerId: string, maxRam: number) => remoteServerService.startMinecraftServer(remoteServerId, minecraftServerId, maxRam))
+  ipcMain.handle('remoteMinecraft:stop', (_event, remoteServerId: string, minecraftServerId: string, force = false) => remoteServerService.stopMinecraftServer(remoteServerId, minecraftServerId, force))
+  ipcMain.handle('remoteMinecraft:command', (_event, remoteServerId: string, minecraftServerId: string, command: string) => remoteServerService.sendMinecraftServerCommand(remoteServerId, minecraftServerId, command))
+  ipcMain.handle('remoteMinecraft:readProperties', (_event, remoteServerId: string, minecraftServerId: string) => remoteServerService.readMinecraftServerProperties(remoteServerId, minecraftServerId))
+  ipcMain.handle('remoteMinecraft:writeProperties', (_event, remoteServerId: string, minecraftServerId: string, content: string) => remoteServerService.writeMinecraftServerProperties(remoteServerId, minecraftServerId, content))
 }
 
 export async function shutdownServices(): Promise<void> {

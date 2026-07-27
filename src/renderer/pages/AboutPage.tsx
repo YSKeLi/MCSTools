@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { GitHub } from '@mui/icons-material'
-import { Avatar, Box, Link, Typography } from '@mui/material'
+import { GitBranch } from 'lucide-react'
+import { Button } from '../components/ui'
 
 export function AboutPage() {
   const [version, setVersion] = useState('')
@@ -10,35 +10,20 @@ export function AboutPage() {
   }, [])
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '70vh',
-        textAlign: 'center',
-        gap: 2,
-      }}
-    >
-      <Avatar src="/icons/app-icon.ico" sx={{ width: 80, height: 80 }} />
-      <Typography variant="h5" fontWeight={700}>
-        Minecraft 服务器搭建工具
-      </Typography>
-      <Typography variant="body2" color="text.secondary">
-        版本 {version || '...'}
-      </Typography>
-      <Typography variant="body1">
-        制作者：<strong>小亚</strong>
-      </Typography>
-      <Link
-        href="https://github.com/YSKeLi/MCSTools"
-        target="_blank"
-        rel="noopener noreferrer"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
-      >
-        <GitHub fontSize="small" /> YSKeLi/MCSTools
-      </Link>
-    </Box>
+    <div className="about-page">
+      <div className="about-page__content">
+        <img className="about-page__icon" src="/icons/app-icon.ico" alt="" />
+        <h1 className="about-page__title">Minecraft 服务器搭建工具</h1>
+        <p className="about-page__meta">版本 {version || '...'}</p>
+        <p className="about-page__meta">制作者：小亚</p>
+        <Button
+          variant="secondary"
+          startIcon={<GitBranch />}
+          onClick={() => void window.electronAPI.openExternal('https://github.com/YSKeLi/MCSTools')}
+        >
+          YSKeLi/MCSTools
+        </Button>
+      </div>
+    </div>
   )
 }

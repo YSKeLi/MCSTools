@@ -9,6 +9,11 @@ export interface ServerDetection {
   jarFiles: string[]
 }
 
+export interface ServerJarFile {
+  name: string
+  size: number
+}
+
 const patterns: Array<{ regex: RegExp; id: string; name: string }> = [
   { regex: /^paper-?(\d[\d.]*)?/i, id: 'paper', name: 'Paper' },
   { regex: /^purpur-?(\d[\d.]*)?/i, id: 'purpur', name: 'Purpur' },
@@ -36,21 +41,19 @@ const patterns: Array<{ regex: RegExp; id: string; name: string }> = [
   { regex: /^server\.jar$/i, id: 'vanilla', name: 'Vanilla' },
 ]
 
-export function detectServer(dir: string): ServerDetection {
-  let files: string[] = []
-  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jar')) } catch { /* ignore */ }
+export function detectServerFiles(jarFiles: ServerJarFile[]): ServerDetection {
+  const files = jarFiles.map(file => file.name)
 
   for (const file of files) {
     for (const p of patterns) {
       const m = file.match(p.regex)
       if (m) {
-        return { jarName: file, coreId: p.id, coreName: p.name, version: m[1] || '未知', jarFiles: files }
+        return { jarName: file, coreId: p.id, coreName: p.name, version: m[1]?.replace(/\.+$/, '') || '未知', jarFiles: files }
       }
     }
   }
 
-  const largest = files.map(f => ({ name: f, size: fs.statSync(path.join(dir, f)).size }))
-    .sort((a, b) => b.size - a.size)
+  const largest = [...jarFiles].sort((a, b) => b.size - a.size)
 
   return {
     jarName: largest[0]?.name || 'server.jar',
@@ -59,4 +62,14 @@ export function detectServer(dir: string): ServerDetection {
     version: '未知',
     jarFiles: files,
   }
+}
+
+export function detectServer(dir: string): ServerDetection {
+  let files: ServerJarFile[] = []
+  try {
+    files = fs.readdirSync(dir)
+      .filter(file => file.toLowerCase().endsWith('.jar'))
+      .map(file => ({ name: file, size: fs.statSync(path.join(dir, file)).size }))
+  } catch { /* ignore */ }
+  return detectServerFiles(files)
 }

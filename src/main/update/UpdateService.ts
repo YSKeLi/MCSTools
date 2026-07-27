@@ -19,6 +19,9 @@ const FALLBACK_INFO_URLS = [
   'https://cdn.jsdelivr.net/gh/YSKeLi/MCSTools@main/public/latest.json',
 ]
 const UPDATE_DOWNLOAD_HOSTS = ['github.com', 'release-assets.githubusercontent.com']
+const UPDATE_INFO_CACHE_MS = 15 * 60 * 1000
+
+let cachedUpdateInfo: { value: UpdateInfo; checkedAt: number } | null = null
 
 interface GitHubReleaseAsset {
   name?: string
@@ -127,12 +130,16 @@ export function getProjectVersion(): string {
 
 export async function checkForUpdates(): Promise<UpdateInfo> {
   try {
-    return normalizeGitHubRelease(await fetchJson<GitHubRelease>(RELEASE_API))
+    const value = normalizeGitHubRelease(await fetchJson<GitHubRelease>(RELEASE_API))
+    cachedUpdateInfo = { value, checkedAt: Date.now() }
+    return value
   } catch (primaryError) {
     let lastError = primaryError instanceof Error ? primaryError : new Error(String(primaryError))
     for (const url of FALLBACK_INFO_URLS) {
       try {
-        return validateFallbackInfo(await fetchJson<unknown>(`${url}?t=${Date.now()}`))
+        const value = validateFallbackInfo(await fetchJson<unknown>(`${url}?t=${Date.now()}`))
+        cachedUpdateInfo = { value, checkedAt: Date.now() }
+        return value
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error))
       }
@@ -197,7 +204,9 @@ function verifyPlatformSignature(filePath: string): void {
 export async function downloadAndInstallUpdate(
   mainWindow: BrowserWindow,
 ): Promise<{ filePath: string; assetName: string }> {
-  const latestInfo = await checkForUpdates()
+  const latestInfo = cachedUpdateInfo && Date.now() - cachedUpdateInfo.checkedAt <= UPDATE_INFO_CACHE_MS
+    ? cachedUpdateInfo.value
+    : await checkForUpdates()
   const currentVersion = getProjectVersion()
   if (compareVersions(currentVersion, latestInfo.version) >= 0) throw new Error('当前已经是最新版本')
 

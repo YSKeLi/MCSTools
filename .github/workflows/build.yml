@@ -1,6 +1,9 @@
 name: Build
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
   push:
     branches:
@@ -9,11 +12,31 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  verify:
     if: github.actor != 'github-actions[bot]' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run verify
+
+  build:
+    needs: verify
+    if: github.event_name != 'pull_request' && (github.actor != 'github-actions[bot]' || startsWith(github.ref, 'refs/tags/v'))
     strategy:
       fail-fast: false
       matrix:
@@ -50,11 +73,15 @@ jobs:
             installer_args: --linux AppImage --arm64
 
     runs-on: ${{ matrix.os }}
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
@@ -66,12 +93,12 @@ jobs:
       - run: npm run build
 
       - name: Build installer
-        run: npx electron-builder ${{ matrix.installer_args }} --publish=never
+        run: node scripts/run-electron-builder.cjs ${{ matrix.installer_args }} --publish=never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build portable zip
-        run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --dir --publish=never
+        run: node scripts/run-electron-builder.cjs --${{ matrix.target }} --${{ matrix.arch }} --dir --publish=never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -99,41 +126,55 @@ jobs:
         with:
           name: MCServerTools-${{ matrix.suffix }}
           path: release/dist/*
+          if-no-files-found: error
+          retention-days: 14
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Prepare release metadata
         run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
+          node <<'NODE'
+          const fs = require('node:fs')
 
-          import os
+          const tag = process.env.GITHUB_REF_NAME
+          const version = tag.replace(/^v/i, '')
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8')
+          const lines = changelog.split(/\r?\n/)
+          const start = lines.findIndex(line => line.trim() === `## ${tag}`)
+          if (start === -1) {
+            throw new Error(`Missing CHANGELOG.md section for ${tag}`)
+          }
 
-          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
-          notes = [
-              "新增云服务器管理",
-              "新增本地设备信息监控",
-              "新增 Java 管理与 Java 21 下载",
-              "支持自动匹配系统和安装包",
-              "支持为服务器单独配置 Java",
-              "重构 FRP 配置导入与切换",
-              "优化 FRP 下载和启动流程",
-              "完善软件检查更新与自动安装",
-              "优化文件下载稳定性",
-              "修复服务器启动和进程控制问题",
-          ]
-          body = f"## v{version} 更新内容\n\n" + "\n".join(f"- {note}" for note in notes)
-          Path("release-body.md").write_text(body + "\n", encoding="utf-8")
-          Path("release-notes.json").write_text(json.dumps(notes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-          PY
+          const next = lines.findIndex((line, index) => index > start && /^##\s+/.test(line))
+          const section = lines
+            .slice(start + 1, next === -1 ? lines.length : next)
+            .map(line => line.replace(/\s+$/, ''))
+            .join('\n')
+            .trim()
+          const sectionLines = section.split(/\r?\n/)
+          const notes = sectionLines
+            .filter(line => /^\s*[-*]\s+/.test(line))
+            .map(line => line.replace(/^\s*[-*]\s+/, '').trim().replace(/\u3002$/, ''))
+
+          if (notes.length === 0) {
+            throw new Error(`CHANGELOG.md section for ${tag} has no bullet notes`)
+          }
+
+          const body = `## v${version} \u66f4\u65b0\u5185\u5bb9\n\n${section}\n`
+          fs.writeFileSync('release-body.md', `${body}\n`, 'utf8')
+          fs.writeFileSync('release-notes.json', `${JSON.stringify(notes, null, 2)}\n`, 'utf8')
+          NODE
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -149,48 +190,54 @@ jobs:
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > release.json
 
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
+          node <<'NODE'
+          const crypto = require('node:crypto')
+          const fs = require('node:fs')
+          const path = require('node:path')
 
-          tag = os.environ["GITHUB_REF_NAME"]
-          version = tag[1:] if tag.startswith("v") else tag
-          release = json.loads(Path("release.json").read_text(encoding="utf-8"))
-          notes = json.loads(Path("release-notes.json").read_text(encoding="utf-8"))
-          artifact_files = {
-              path.name: path
-              for path in Path("artifacts").rglob("*")
-              if path.is_file()
+          function walkFiles(dir) {
+            return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+              const fullPath = path.join(dir, entry.name)
+              return entry.isDirectory() ? walkFiles(fullPath) : [fullPath]
+            })
           }
-          assets = []
-          for asset in release.get("assets", []):
-              asset_path = artifact_files.get(asset["name"])
-              if asset_path is None:
-                  raise RuntimeError(f"Missing downloaded artifact: {asset['name']}")
-              digest = hashlib.sha256(asset_path.read_bytes()).hexdigest()
-              assets.append({
-                  "name": asset["name"],
-                  "url": asset["browser_download_url"],
-                  "size": asset.get("size"),
-                  "sha256": digest,
-              })
 
-          latest = {
-              "repo": os.environ["GITHUB_REPOSITORY"],
-              "source": "github-release",
-              "version": version,
-              "tag": tag,
-              "title": tag,
-              "publishedAt": release.get("published_at"),
-              "url": release.get("html_url"),
-              "assets": assets,
-              "assetsCount": len(assets),
-              "notes": notes,
+          const tag = process.env.GITHUB_REF_NAME
+          const version = tag.replace(/^v/i, '')
+          const release = JSON.parse(fs.readFileSync('release.json', 'utf8'))
+          const notes = JSON.parse(fs.readFileSync('release-notes.json', 'utf8'))
+          const artifactFiles = new Map(walkFiles('artifacts').map(file => [path.basename(file), file]))
+          const assets = []
+
+          for (const asset of release.assets || []) {
+            const assetPath = artifactFiles.get(asset.name)
+            if (!assetPath) {
+              throw new Error(`Missing downloaded artifact: ${asset.name}`)
+            }
+
+            assets.push({
+              name: asset.name,
+              url: asset.browser_download_url,
+              size: asset.size,
+              sha256: crypto.createHash('sha256').update(fs.readFileSync(assetPath)).digest('hex'),
+            })
           }
-          Path("latest.json").write_text(json.dumps(latest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-          PY
+
+          const latest = {
+            repo: process.env.GITHUB_REPOSITORY,
+            source: 'github-release',
+            version,
+            tag,
+            title: tag,
+            publishedAt: release.published_at,
+            url: release.html_url,
+            assets,
+            assetsCount: assets.length,
+            notes,
+          }
+
+          fs.writeFileSync('latest.json', `${JSON.stringify(latest, null, 2)}\n`, 'utf8')
+          NODE
 
           git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
           cd repo

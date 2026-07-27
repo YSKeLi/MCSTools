@@ -3,22 +3,10 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { normalizeFsPath } from './security/pathPolicy'
+import { repairStoredServers, type InvalidStoredServer, type StoredServerEntry } from './serverStorePolicy'
 import { readJsonStore, writeJsonStore } from './utils/jsonStore'
 
-export interface ServerEntry {
-  id: string
-  name: string
-  path: string
-  coreId: string
-  coreName: string
-  version: string
-  jarName: string
-  iconUrl?: string
-  createdAt: string
-  maxRam: number
-  javaPath?: string
-  managedPath: boolean
-}
+export type ServerEntry = StoredServerEntry
 
 export interface ServerEntryInput {
   name: string
@@ -40,39 +28,56 @@ export interface ServerEntryUpdate {
 }
 
 const STORE_PATH = path.join(app.getPath('userData'), 'servers.json')
+const INVALID_STORE_PATH = path.join(app.getPath('userData'), 'servers.invalid.json')
 
 function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value.trim() : fallback
 }
 
-function normalizeStoredServer(value: unknown): ServerEntry | null {
-  if (!value || typeof value !== 'object') return null
-  const item = value as Partial<ServerEntry>
-  const id = text(item.id)
-  const directory = text(item.path)
-  const jarName = text(item.jarName)
-  if (!id || !directory || !jarName || path.basename(jarName) !== jarName) return null
-  return {
-    id,
-    name: text(item.name, '未命名服务器'),
-    path: path.resolve(directory),
-    coreId: text(item.coreId, 'unknown'),
-    coreName: text(item.coreName, '未知'),
-    version: text(item.version, '未知'),
-    jarName,
-    iconUrl: text(item.iconUrl) || undefined,
-    createdAt: text(item.createdAt, new Date(0).toISOString()),
-    maxRam: Number.isFinite(Number(item.maxRam)) ? Math.max(512, Math.min(131072, Number(item.maxRam))) : 2048,
-    javaPath: text(item.javaPath) || undefined,
-    managedPath: item.managedPath === true,
+function writeInvalidRecords(records: InvalidStoredServer[]): void {
+  if (!records.length) return
+
+  try {
+    if (fs.existsSync(INVALID_STORE_PATH)) {
+      const existing = JSON.parse(fs.readFileSync(INVALID_STORE_PATH, 'utf8')) as { records?: unknown }
+      if (JSON.stringify(existing.records) === JSON.stringify(records)) return
+    }
+  } catch {
+    // Replace an unreadable previous report with the current one.
   }
+
+  writeJsonStore(INVALID_STORE_PATH, {
+    generatedAt: new Date().toISOString(),
+    source: STORE_PATH,
+    records,
+  })
 }
 
 function readStore(): ServerEntry[] {
   const raw = readJsonStore<unknown[]>(STORE_PATH, [], Array.isArray, '本地服务器')
-  const servers = raw.map(normalizeStoredServer)
-  if (servers.some(server => server === null)) throw new Error('本地服务器数据包含无效记录')
-  return servers as ServerEntry[]
+  const result = repairStoredServers(raw, randomUUID)
+  if (!result.repairedCount && !result.invalid.length) return result.servers
+
+  try {
+    writeInvalidRecords(result.invalid)
+  } catch (error) {
+    console.warn('无法写入本地服务器坏记录报告:', error)
+  }
+
+  // If every record is invalid, keep the original file untouched. A later add still
+  // writes a valid list and the normal .bak mechanism preserves that original file.
+  if (result.servers.length > 0) {
+    try {
+      writeStore(result.servers)
+    } catch (error) {
+      console.warn('无法写回修复后的本地服务器数据:', error)
+    }
+  }
+
+  console.warn(
+    `本地服务器数据已容错处理：修复 ${result.repairedCount} 条，隔离 ${result.invalid.length} 条`,
+  )
+  return result.servers
 }
 
 function writeStore(list: ServerEntry[]) {

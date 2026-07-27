@@ -78,7 +78,7 @@ declare global {
     assetsCount?: number
   }
 
-  type RemoteServerOs = 'linux' | 'windows'
+  type RemoteServerOs = 'linux' | 'windows' | 'macos'
 
   interface RemoteServerInput {
     name: string
@@ -177,6 +177,11 @@ declare global {
     osName: string
     kernel: string
     uptimeSeconds: number
+    bios: {
+      vendor: string
+      version: string
+      releaseDate: string
+    }
     cpu: {
       model: string
       cores: number
@@ -235,7 +240,7 @@ declare global {
     managedPath?: boolean
   }
 
-  type ServerProcessStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'error'
+  type ServerProcessStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'error' | 'external'
 
   interface ServerRuntimeState {
     serverId: string | null
@@ -247,6 +252,79 @@ declare global {
     line: string
   }
 
+  interface RemoteMinecraftDirectory {
+    path: string
+    name: string
+    jarFiles: string[]
+    suggestedJar: string
+    suggestedType: string
+    suggestedVersion: string
+    suggestedRemark: string
+  }
+
+  interface RemoteFileBrowserItem {
+    name: string
+    path: string
+    type: 'directory' | 'file' | 'drive'
+    size: number
+  }
+
+  interface RemoteDirectoryListing {
+    path: string
+    parentPath: string | null
+    items: RemoteFileBrowserItem[]
+    containsServerProperties: boolean
+  }
+
+  interface RemoteMinecraftServer {
+    id: string
+    name: string
+    path: string
+    jarName: string
+    coreType: string
+    version: string
+    remark: string
+    maxRam: number
+    createdAt: string
+  }
+
+  interface RemoteMinecraftServerInput {
+    path: string
+    jarName?: string
+    coreType: string
+    version: string
+    remark: string
+    maxRam?: number
+  }
+
+  type RemoteMinecraftServerStatus = 'running' | 'external' | 'stopped' | 'error'
+
+  interface ServerPlayerSnapshot {
+    serverId: string | null
+    players: string[]
+  }
+
+  interface PlayerSkinInfo {
+    playerName: string
+    premium: boolean
+    skinUrl: string | null
+    model: 'classic' | 'slim'
+  }
+
+  type LanguagePreference = 'system' | 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko'
+  type CloseBehavior = 'quit' | 'tray'
+
+  interface AppSettingsView {
+    language: LanguagePreference
+    accentColor: string
+    backgroundTransparency: number
+    autoLaunch: boolean
+    closeBehavior: CloseBehavior
+    checkUpdatesOnStartup: boolean
+    hasBackgroundImage: boolean
+    backgroundImageUrl: string | null
+  }
+
   interface ElectronAPI {
     getCores: () => Promise<CoreInfo[]>
     getVersions: (coreId: string) => Promise<CoreVersion[]>
@@ -254,9 +332,12 @@ declare global {
     startServer: (serverId: string, maxRam: number) => Promise<void>
     stopServer: (serverId: string) => Promise<void>
     forceStopServer: (serverId: string) => Promise<void>
-    getServerStatus: () => Promise<ServerRuntimeState>
+    getServerStatus: (serverId?: string) => Promise<ServerRuntimeState>
+    getServerLogs: (serverId: string) => Promise<string[]>
+    getServerPlayers: () => Promise<ServerPlayerSnapshot>
+    getPlayerSkin: (playerName: string) => Promise<PlayerSkinInfo>
     sendServerCommand: (serverId: string, cmd: string) => Promise<void>
-    getLocalSystemMetrics: () => Promise<LocalSystemMetrics>
+    getLocalSystemMetrics: (options?: { refreshDisk?: boolean }) => Promise<LocalSystemMetrics>
     serversList: () => Promise<ServerEntry[]>
     serversAdd: (s: ServerEntryInput) => Promise<ServerEntry>
     serversRemove: (id: string, options?: { deleteFiles?: boolean }) => Promise<void>
@@ -277,6 +358,10 @@ declare global {
     downloadJavaPackage: (packageId: string) => Promise<{ filePath: string; packageInfo: JavaDownloadPackage }>
     detectServer: (dir: string) => Promise<ServerDetection>
     getAppVersion: () => Promise<string>
+    getAppSettings: () => Promise<AppSettingsView>
+    updateAppSettings: (patch: Partial<Omit<AppSettingsView, 'hasBackgroundImage' | 'backgroundImageUrl'>>) => Promise<AppSettingsView>
+    selectBackgroundImage: () => Promise<AppSettingsView | null>
+    clearBackgroundImage: () => Promise<AppSettingsView>
     checkForUpdates: () => Promise<LatestReleaseInfo>
     downloadAndInstallUpdate: () => Promise<{ filePath: string; assetName: string }>
     openExternal: (url: string) => Promise<void>
@@ -285,13 +370,29 @@ declare global {
     remoteServersAdd: (input: RemoteServerInput) => Promise<RemoteServerAddResult>
     remoteServersRemove: (id: string) => Promise<void>
     remoteServerGetMetrics: (id: string) => Promise<RemoteServerMetrics>
+    remoteMinecraftServersList: (remoteServerId: string) => Promise<RemoteMinecraftServer[]>
+    remoteMinecraftFindDirectories: (remoteServerId: string) => Promise<RemoteMinecraftDirectory[]>
+    remoteMinecraftInspectDirectory: (remoteServerId: string, remotePath: string) => Promise<RemoteMinecraftDirectory>
+    remoteMinecraftBrowseDirectory: (remoteServerId: string, remotePath?: string) => Promise<RemoteDirectoryListing>
+    remoteMinecraftServersAdd: (remoteServerId: string, input: RemoteMinecraftServerInput) => Promise<RemoteMinecraftServer>
+    remoteMinecraftServersRemove: (remoteServerId: string, minecraftServerId: string) => Promise<void>
+    remoteMinecraftServerUpdate: (remoteServerId: string, minecraftServerId: string, maxRam: number) => Promise<RemoteMinecraftServer>
+    remoteMinecraftServerStatus: (remoteServerId: string, minecraftServerId: string) => Promise<RemoteMinecraftServerStatus>
+    remoteMinecraftServerLogs: (remoteServerId: string, minecraftServerId: string) => Promise<string[]>
+    remoteMinecraftServerStart: (remoteServerId: string, minecraftServerId: string, maxRam: number) => Promise<void>
+    remoteMinecraftServerStop: (remoteServerId: string, minecraftServerId: string, force?: boolean) => Promise<void>
+    remoteMinecraftServerCommand: (remoteServerId: string, minecraftServerId: string, command: string) => Promise<void>
+    remoteMinecraftServerReadProperties: (remoteServerId: string, minecraftServerId: string) => Promise<string>
+    remoteMinecraftServerWriteProperties: (remoteServerId: string, minecraftServerId: string, content: string) => Promise<void>
     onServerLog: (callback: (event: ServerLogEvent) => void) => () => void
     onServerStatus: (callback: (state: ServerRuntimeState) => void) => () => void
+    onServerPlayers: (callback: (snapshot: ServerPlayerSnapshot) => void) => () => void
     onDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void
     onUpdateDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void
     onJavaDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void
     frpStop: () => Promise<void>
     frpStatus: () => Promise<string>
+    frpLogs: () => Promise<string[]>
     frpConfigsList: () => Promise<FrpSavedConfig[]>
     frpConfigsPickFile: () => Promise<ImportedFrpConfig | null>
     frpConfigsAdd: (name: string, filePath: string) => Promise<FrpSavedConfig>

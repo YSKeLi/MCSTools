@@ -1,9 +1,25 @@
-import { ChildProcess, spawn } from 'child_process'
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import * as fs from 'fs'
+import * as net from 'net'
 import * as path from 'path'
 import { resolveJava } from '../java'
+import {
+  managedLogFileName,
+  PersistentProcessController,
+  readRecentLogLines,
+} from '../runtime/PersistentProcessController'
+import type { ManagedProcessState } from '../runtime/types'
+import { getServer } from '../store'
+import { hasLiveRemoteMinecraftMarker, isExternalMinecraftProcess, readLiveRemoteMinecraftPid } from './externalMinecraftProcess'
 import { requiredJavaMajor } from './javaPolicy'
+import {
+  type MinecraftControlDescriptor,
+  createManagedControlRecord,
+  readLocalMinecraftControl,
+  removeLocalMinecraftControl,
+  writeLocalMinecraftControl,
+} from './minecraftControlProtocol'
+import { parsePlayerConnectionEvent } from './playerTracking'
 
 interface ServerConfig {
   serverId: string
@@ -16,42 +32,254 @@ interface ServerConfig {
   extraArgs?: string[]
 }
 
-export type ServerProcessStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'error'
+export type ServerProcessStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'error' | 'external'
 
 export interface ServerRuntimeState {
   serverId: string | null
   status: ServerProcessStatus
 }
 
+export interface ServerPlayerSnapshot {
+  serverId: string | null
+  players: string[]
+}
+
+function writeNamedPipe(pipeName: string, value: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(`\\\\.\\pipe\\${pipeName}`)
+    const timer = setTimeout(() => {
+      socket.destroy()
+      reject(new Error('连接服务器控制通道超时'))
+    }, 5000)
+    socket.once('connect', () => socket.end(value))
+    socket.once('error', error => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    socket.once('close', hadError => {
+      clearTimeout(timer)
+      if (!hadError) resolve()
+    })
+  })
+}
+
+function writeFifo(inputPath: string, value: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stream = fs.createWriteStream(inputPath, { flags: 'a' })
+    const timer = setTimeout(() => {
+      stream.destroy()
+      reject(new Error('连接服务器控制通道超时'))
+    }, 5000)
+    stream.once('open', () => stream.end(`${value}\n`))
+    stream.once('error', error => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    stream.once('finish', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
+async function sendControlCommand(
+  descriptor: MinecraftControlDescriptor,
+  type: 'stdin' | 'stop' | 'kill',
+  value?: string,
+): Promise<void> {
+  if (descriptor.transport === 'command-file') {
+    fs.appendFileSync(descriptor.commandPath!, createManagedControlRecord(descriptor, type, value), 'utf8')
+    return
+  }
+  if (type === 'kill') throw new Error('该控制通道不支持强制停止命令')
+  const command = type === 'stop' ? 'stop' : value || ''
+  if (descriptor.transport === 'fifo') await writeFifo(descriptor.inputPath!, command)
+  else await writeNamedPipe(descriptor.pipeName!, command)
+}
+
 export class ServerManager {
-  private process: ChildProcess | null = null
-  private config: ServerConfig | null = null
   private mainWindow: BrowserWindow | null = null
-  private status: ServerProcessStatus = 'stopped'
-  private forceStopTimer: NodeJS.Timeout | null = null
+  private readonly runtimeDirectory: string
+  private readonly controller: PersistentProcessController
+  private onlinePlayers = new Map<string, string>()
+
+  constructor() {
+    this.runtimeDirectory = path.join(app.getPath('userData'), 'managed-processes', 'server')
+    this.controller = new PersistentProcessController({
+      runtimeDirectory: this.runtimeDirectory,
+      service: 'server',
+      onLog: line => this.handleLog(line),
+      onState: state => this.handleState(state),
+    })
+    this.restorePlayers()
+    const restoredState = this.controller.getState()
+    if (restoredState) this.publishManagedControl(restoredState)
+  }
 
   setWindow(win: BrowserWindow) { this.mainWindow = win }
-  get running() { return this.process !== null }
+  get running() { return this.controller.isRunning() }
 
   getState(): ServerRuntimeState {
-    return { serverId: this.process ? this.config?.serverId || null : null, status: this.status }
+    const state = this.controller.getState()
+    return {
+      serverId: state?.serviceId || null,
+      status: state?.status || 'stopped',
+    }
   }
 
-  private emitLog(line: string, serverId = this.config?.serverId || null) {
-    this.mainWindow?.webContents.send('server:log', { serverId, line })
+  async getStateForServer(serverId: string): Promise<ServerRuntimeState> {
+    const state = this.controller.getState()
+    if (state?.serviceId === serverId && (state.status === 'starting' || this.controller.isRunning())) {
+      return { serverId, status: state.status }
+    }
+
+    const server = getServer(serverId)
+    if (server && await isExternalMinecraftProcess(server.path, server.jarName)) {
+      return { serverId, status: 'external' }
+    }
+
+    return {
+      serverId,
+      status: state?.serviceId === serverId && state.status === 'error' ? 'error' : 'stopped',
+    }
   }
 
-  private emitStatus(status: ServerProcessStatus, serverId = this.config?.serverId || null) {
-    this.status = status
-    this.mainWindow?.webContents.send('server:status', { serverId, status })
+  getLogs(serverId: string): string[] {
+    const managedLogPath = this.getLogPath(serverId)
+    const state = this.controller.getState()
+    if (state?.serviceId === serverId && this.controller.isRunning()) {
+      return this.controller.getLogs(managedLogPath)
+    }
+
+    const server = getServer(serverId)
+    if (!server) return this.controller.getLogs(managedLogPath)
+    const remoteManagedLogPath = path.join(server.path, '.mcstools', 'server.log')
+    const sharedControl = readLocalMinecraftControl(server.path)
+    const sharedLogPath = sharedControl?.logPath || remoteManagedLogPath
+    if (hasLiveRemoteMinecraftMarker(server.path) && fs.existsSync(sharedLogPath)) {
+      return readRecentLogLines(sharedLogPath)
+    }
+
+    const candidates = [managedLogPath, remoteManagedLogPath, path.join(server.path, 'logs', 'latest.log')]
+      .map(filePath => {
+        try {
+          return { filePath, modifiedAt: fs.statSync(filePath).mtimeMs }
+        } catch {
+          return null
+        }
+      })
+      .filter((candidate): candidate is { filePath: string; modifiedAt: number } => candidate !== null)
+      .sort((left, right) => right.modifiedAt - left.modifiedAt)
+    return candidates[0] ? readRecentLogLines(candidates[0].filePath) : []
   }
 
-  private clearForceStopTimer() {
-    if (this.forceStopTimer) clearTimeout(this.forceStopTimer)
-    this.forceStopTimer = null
+  getPlayerSnapshot(): ServerPlayerSnapshot {
+    const state = this.controller.getState()
+    return {
+      serverId: state?.serviceId || null,
+      players: state?.players || [...this.onlinePlayers.values()],
+    }
   }
 
-  private ensureEulaAccepted(serverDir: string) {
+  async start(config: ServerConfig): Promise<void> {
+    const currentState = this.controller.getState()
+    if (this.controller.isRunning()) {
+      if (currentState?.serviceId === config.serverId) return
+      throw new Error('已有其他服务器正在运行，请先停止后再启动')
+    }
+    if (await isExternalMinecraftProcess(config.serverDir, config.jarName)) {
+      throw new Error('检测到该目录的 Minecraft 服务器已由外部进程启动')
+    }
+    if (!fs.existsSync(config.jarPath) || !fs.statSync(config.jarPath).isFile()) {
+      throw new Error(`找不到服务端 JAR: ${config.jarPath}`)
+    }
+
+    const minimumJava = requiredJavaMajor(config.version)
+    const javaInfo = resolveJava(config.javaPath, minimumJava)
+    if (!javaInfo) throw new Error(`当前服务器需要 Java ${minimumJava} 或更高版本，请在 Java 管理中安装或重新选择`)
+
+    const initialLogs = [
+      '',
+      `[MST] ===== 新会话 ${new Date().toLocaleString('zh-CN', { hour12: false })} =====`,
+      ...this.ensureEulaAccepted(config.serverDir),
+    ]
+    const args = [
+      `-Xmx${config.maxRam}M`,
+      '-jar',
+      config.jarPath,
+      'nogui',
+      ...(config.extraArgs || []),
+    ]
+    initialLogs.push(`[MST] 使用 Java: ${javaInfo.path} (${javaInfo.version})`)
+    initialLogs.push(`[MST] 启动命令: ${javaInfo.path} ${args.join(' ')}`)
+
+    this.resetPlayers(config.serverId)
+    const state = await this.controller.start({
+      service: 'server',
+      serviceId: config.serverId,
+      executable: javaInfo.path,
+      args,
+      cwd: config.serverDir,
+      logPath: this.getLogPath(config.serverId),
+      stdoutPrefix: '',
+      stderrPrefix: '[ERR] ',
+      stopMode: 'stdin',
+      stopTimeoutMs: 10000,
+      initialLogs,
+    })
+    this.publishManagedControl(state)
+  }
+
+  async stop(serverId: string): Promise<void> {
+    if (this.isManagedServerActive(serverId)) {
+      this.controller.stop(false)
+      return
+    }
+    await sendControlCommand(this.getExternalControl(serverId), 'stop')
+  }
+
+  async forceStop(serverId: string): Promise<void> {
+    if (this.isManagedServerActive(serverId)) {
+      this.controller.stop(true)
+      return
+    }
+    const server = getServer(serverId)
+    if (!server) throw new Error('服务器不存在')
+    const descriptor = this.getExternalControl(serverId)
+    if (descriptor.transport === 'command-file') {
+      await sendControlCommand(descriptor, 'kill')
+      return
+    }
+    const pid = readLiveRemoteMinecraftPid(server.path)
+    if (!pid) throw new Error('服务器进程已经停止')
+    try {
+      if (process.platform !== 'win32') process.kill(-pid, 'SIGKILL')
+      else process.kill(pid, 'SIGKILL')
+    } catch {
+      process.kill(pid, 'SIGKILL')
+    }
+  }
+
+  async sendCommand(serverId: string, command: string): Promise<void> {
+    const value = typeof command === 'string' ? command.trim() : ''
+    if (!value || /[\r\n]/.test(value) || value.length > 4096) throw new Error('服务器命令无效')
+    if (this.isManagedServerActive(serverId)) {
+      this.controller.sendStdin(value)
+      return
+    }
+    await sendControlCommand(this.getExternalControl(serverId), 'stdin', value)
+  }
+
+  async shutdown(): Promise<void> {
+    this.controller.dispose()
+  }
+
+  private getLogPath(serverId: string): string {
+    return path.join(this.runtimeDirectory, 'logs', managedLogFileName(serverId))
+  }
+
+  private ensureEulaAccepted(serverDir: string): string[] {
+    const messages: string[] = []
     const eulaPath = path.join(serverDir, 'eula.txt')
     const eulaContent = [
       '# Generated by Minecraft Server Tools',
@@ -65,138 +293,104 @@ export class ServerManager {
     try {
       if (!fs.existsSync(eulaPath) || !/^\s*eula\s*=\s*true\s*$/im.test(fs.readFileSync(eulaPath, 'utf8'))) {
         fs.writeFileSync(eulaPath, eulaContent, 'utf8')
-        this.emitLog('[MST] 已自动写入 eula.txt 并同意 EULA')
+        messages.push('[MST] 已自动写入 eula.txt 并同意 EULA')
       }
     } catch (error) {
-      this.emitLog(`[MST] 写入 eula.txt 失败: ${error instanceof Error ? error.message : String(error)}`)
+      messages.push(`[MST] 写入 eula.txt 失败: ${error instanceof Error ? error.message : String(error)}`)
     }
+    return messages
   }
 
-  async start(config: ServerConfig): Promise<void> {
-    if (this.process) {
-      if (this.config?.serverId === config.serverId) return
-      throw new Error('已有其他服务器正在运行，请先停止后再启动')
-    }
-    if (!fs.existsSync(config.jarPath) || !fs.statSync(config.jarPath).isFile()) {
-      throw new Error(`找不到服务端 JAR: ${config.jarPath}`)
-    }
-
-    const minimumJava = requiredJavaMajor(config.version)
-    const javaInfo = resolveJava(config.javaPath, minimumJava)
-    if (!javaInfo) throw new Error(`当前服务器需要 Java ${minimumJava} 或更高版本，请在 Java 管理中安装或重新选择`)
-
-    this.config = config
-    this.ensureEulaAccepted(config.serverDir)
-    const args = [
-      `-Xmx${config.maxRam}M`,
-      '-jar',
-      config.jarPath,
-      'nogui',
-      ...(config.extraArgs || []),
-    ]
-
-    this.emitStatus('starting', config.serverId)
-    this.emitLog(`[MST] 使用 Java: ${javaInfo.path} (${javaInfo.version})`, config.serverId)
-    this.emitLog(`[MST] 启动命令: ${javaInfo.path} ${args.join(' ')}`, config.serverId)
-
-    const child = spawn(javaInfo.path, args, {
-      cwd: config.serverDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-    this.process = child
-
-    child.stdout?.on('data', (data: Buffer) => {
-      data.toString().split(/\r?\n/).filter(Boolean).forEach(line => this.emitLog(line, config.serverId))
-    })
-    child.stderr?.on('data', (data: Buffer) => {
-      data.toString().split(/\r?\n/).filter(Boolean).forEach(line => this.emitLog(`[ERR] ${line}`, config.serverId))
-    })
-    child.on('close', (code) => {
-      if (this.process !== child) return
-      this.clearForceStopTimer()
-      this.emitLog(`[MST] 服务端进程已退出 (code: ${code})`, config.serverId)
-      this.process = null
-      this.config = null
-      this.emitStatus('stopped', config.serverId)
-    })
-
-    await new Promise<void>((resolve, reject) => {
-      const onSpawn = () => {
-        child.off('error', onInitialError)
-        child.on('error', error => {
-          if (this.process !== child) return
-          this.emitLog(`[MST] 进程错误: ${error.message}`, config.serverId)
-          this.emitStatus('error', config.serverId)
-        })
-        this.emitStatus('running', config.serverId)
-        resolve()
-      }
-      const onInitialError = (error: Error) => {
-        child.off('spawn', onSpawn)
-        if (this.process === child) {
-          this.process = null
-          this.config = null
-        }
-        this.emitLog(`[MST] 启动失败: ${error.message}`, config.serverId)
-        this.emitStatus('error', config.serverId)
-        reject(error)
-      }
-      child.once('spawn', onSpawn)
-      child.once('error', onInitialError)
-    })
+  private isManagedServerActive(serverId: string): boolean {
+    const state = this.controller.getState()
+    return Boolean(state?.serviceId === serverId && this.controller.isRunning())
   }
 
-  stop(serverId: string): void {
-    this.assertActiveServer(serverId)
-    if (!this.process) return
-    this.emitStatus('stopping', serverId)
-    this.emitLog('[MST] 正在关闭服务端...', serverId)
-    this.process.stdin?.write('stop\n')
-    this.clearForceStopTimer()
-    this.forceStopTimer = setTimeout(() => this.forceStop(serverId), 10000)
+  private getExternalControl(serverId: string): MinecraftControlDescriptor {
+    const server = getServer(serverId)
+    if (!server) throw new Error('服务器不存在')
+    if (!hasLiveRemoteMinecraftMarker(server.path)) throw new Error('所选服务器当前没有运行')
+    const descriptor = readLocalMinecraftControl(server.path)
+    if (!descriptor) throw new Error('该服务器没有可用的控制通道，请通过本工具重新启动后再操作')
+    return descriptor
   }
 
-  forceStop(serverId: string): void {
-    this.assertActiveServer(serverId)
-    this.clearForceStopTimer()
-    if (this.process) {
-      this.emitLog('[MST] 强制关闭服务端进程', serverId)
-      this.process.kill('SIGKILL')
-    }
-  }
-
-  sendCommand(serverId: string, command: string): void {
-    this.assertActiveServer(serverId)
-    if (!this.process?.stdin) throw new Error('服务器控制台不可用')
-    const value = typeof command === 'string' ? command.trim() : ''
-    if (!value || /[\r\n]/.test(value) || value.length > 4096) throw new Error('服务器命令无效')
-    this.process.stdin.write(`${value}\n`)
-  }
-
-  private assertActiveServer(serverId: string) {
-    if (!this.process || !this.config) throw new Error('当前没有正在运行的服务器')
-    if (this.config.serverId !== serverId) throw new Error('所选服务器当前没有运行')
-  }
-
-  async shutdown(): Promise<void> {
-    if (!this.process || !this.config) return
-    const child = this.process
-    const serverId = this.config.serverId
+  private publishManagedControl(state: ManagedProcessState) {
+    if (state.status !== 'running' || !state.childPid) return
+    const server = getServer(state.serviceId)
+    if (!server) return
     try {
-      this.stop(serverId)
-    } catch {
-      child.kill('SIGKILL')
+      writeLocalMinecraftControl(server.path, {
+        version: 1,
+        transport: 'command-file',
+        logPath: state.logPath,
+        commandPath: state.commandPath,
+        sessionId: state.sessionId,
+      }, state.childPid)
+    } catch (error) {
+      console.warn('无法发布 Minecraft 跨入口控制信息:', error)
     }
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        if (this.process === child) child.kill('SIGKILL')
-        resolve()
-      }, 5000)
-      child.once('close', () => {
-        clearTimeout(timer)
-        resolve()
-      })
-    })
+  }
+
+  private handleLog(line: string) {
+    const serverId = this.controller?.getState()?.serviceId || null
+    this.trackPlayerConnection(line, serverId)
+    this.mainWindow?.webContents.send('server:log', { serverId, line })
+  }
+
+  private handleState(state: ManagedProcessState) {
+    if (state.status === 'stopped' || state.status === 'error') {
+      const server = getServer(state.serviceId)
+      const processStillAlive = server ? hasLiveRemoteMinecraftMarker(server.path) : false
+      if (server && !processStillAlive) removeLocalMinecraftControl(server.path, state.sessionId)
+      this.resetPlayers(state.serviceId)
+    } else if (state.players) {
+      this.publishManagedControl(state)
+      this.onlinePlayers = new Map(state.players.map(player => [player.toLowerCase(), player]))
+      this.emitPlayers(state.serviceId)
+    }
+    this.mainWindow?.webContents.send('server:status', {
+      serverId: state.serviceId,
+      status: state.status,
+    } satisfies ServerRuntimeState)
+  }
+
+  private emitPlayers(serverId: string | null) {
+    this.mainWindow?.webContents.send('server:players', {
+      serverId,
+      players: [...this.onlinePlayers.values()],
+    } satisfies ServerPlayerSnapshot)
+  }
+
+  private resetPlayers(serverId: string | null) {
+    this.onlinePlayers.clear()
+    this.emitPlayers(serverId)
+  }
+
+  private trackPlayerConnection(line: string, serverId: string | null, emit = true) {
+    if (!serverId) return
+    const event = parsePlayerConnectionEvent(line)
+    if (!event) return
+
+    const key = event.playerName.toLowerCase()
+    if (event.action === 'join') {
+      if (this.onlinePlayers.get(key) === event.playerName) return
+      this.onlinePlayers.set(key, event.playerName)
+      if (emit) this.emitPlayers(serverId)
+      return
+    }
+
+    if (this.onlinePlayers.delete(key) && emit) this.emitPlayers(serverId)
+  }
+
+  private restorePlayers() {
+    const state = this.controller.getState()
+    if (!state || state.status !== 'running') return
+    this.onlinePlayers.clear()
+    if (state.players) {
+      state.players.forEach(player => this.onlinePlayers.set(player.toLowerCase(), player))
+      return
+    }
+    this.getLogs(state.serviceId).forEach(line => this.trackPlayerConnection(line, state.serviceId, false))
   }
 }

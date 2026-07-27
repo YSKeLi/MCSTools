@@ -34,6 +34,13 @@ export async function downloadFile(
 
   fs.mkdirSync(path.dirname(destPath), { recursive: true })
   removeFileIfExists(tempPath, '临时下载文件')
+  emitDownloadProgress(mainWindow, progressChannel, {
+    percent: 0,
+    loaded: 0,
+    total: options.expectedSize || 0,
+    speed: 0,
+    fileName,
+  })
 
   try {
     await downloadAttempt(url, destPath, fileName, mainWindow, undefined, progressChannel, options)
@@ -139,7 +146,7 @@ function downloadAttempt(
 
       const contentLength = response.headers['content-length']
       const rawTotal = Array.isArray(contentLength) ? contentLength[0] : contentLength
-      const total = Number.parseInt(rawTotal || '0', 10) || 0
+      const total = Number.parseInt(rawTotal || '0', 10) || options.expectedSize || 0
       file = fs.createWriteStream(tempPath)
       file.on('error', (error) => fail(error))
 
@@ -152,12 +159,12 @@ function downloadAttempt(
         file.write(chunk)
 
         const now = Date.now()
-        if (total > 0 && now - lastChecked >= 250 && mainWindow && !mainWindow.isDestroyed()) {
+        if (total > 0 && now - lastChecked >= 250) {
           const elapsed = (now - lastChecked) / 1000
           const speed = elapsed > 0 ? Math.round((loaded - lastLoaded) / elapsed) : 0
           lastChecked = now
           lastLoaded = loaded
-          mainWindow.webContents.send(progressChannel, {
+          emitDownloadProgress(mainWindow, progressChannel, {
             percent: Math.min(100, Math.round((loaded / total) * 100)),
             loaded,
             total,
@@ -187,6 +194,13 @@ function downloadAttempt(
             }
             removeFileIfExists(destPath, '目标文件')
             fs.renameSync(tempPath, destPath)
+            emitDownloadProgress(mainWindow, progressChannel, {
+              percent: 100,
+              loaded,
+              total: total || loaded,
+              speed: 0,
+              fileName,
+            })
             settled = true
             resolve()
           } catch (error) {
@@ -200,6 +214,15 @@ function downloadAttempt(
     resetInactivityTimeout()
     request.end()
   })
+}
+
+function emitDownloadProgress(
+  mainWindow: BrowserWindow | undefined,
+  channel: string,
+  progress: DownloadProgress,
+): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send(channel, progress)
 }
 
 function assertAllowedDownloadUrl(url: string, allowedHosts?: string[]) {

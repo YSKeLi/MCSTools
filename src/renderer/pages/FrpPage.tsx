@@ -1,28 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Paper,
-  Select,
-  TextField,
-  Typography,
-} from '@mui/material'
-import { DeleteOutline, FileOpen, PlayArrow, Stop } from '@mui/icons-material'
+import { FolderOpen, Play, Square, Trash2 } from 'lucide-react'
+import { AlertBanner, Badge, Button, Dialog, Field } from '../components/ui'
+import { getActiveLanguage } from '../localization'
+
+function mergeLogHistory(history: string[], live: string[], limit = 500): string[] {
+  let overlap = Math.min(history.length, live.length)
+  while (overlap > 0) {
+    const historyStart = history.length - overlap
+    if (history.slice(historyStart).every((line, index) => line === live[index])) break
+    overlap -= 1
+  }
+  return [...history, ...live.slice(overlap)].slice(-limit)
+}
 
 function formatDateTime(value?: string) {
   if (!value) return '未使用'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return date.toLocaleString(getActiveLanguage(), { hour12: false })
 }
 
 export function FrpPage() {
@@ -36,32 +31,27 @@ export function FrpPage() {
   const [actionError, setActionError] = useState('')
   const logEndRef = useRef<HTMLDivElement>(null)
 
-  const selectedConfig = useMemo(
-    () => configs.find((item) => item.id === selectedId) || null,
-    [configs, selectedId],
-  )
+  const selectedConfig = useMemo(() => configs.find(item => item.id === selectedId) || null, [configs, selectedId])
 
   useEffect(() => {
-    if (!window.electronAPI?.onFrpLog) return
-    const unsubLog = window.electronAPI.onFrpLog((line) => setLogs((prev) => [...prev.slice(-200), line]))
-    const unsubStatus = window.electronAPI.onFrpStatus((value) => setStatus(value))
+    const unsubLog = window.electronAPI.onFrpLog(line => setLogs(prev => [...prev.slice(-499), line]))
+    const unsubStatus = window.electronAPI.onFrpStatus(setStatus)
     const unsubConfigs = window.electronAPI.onFrpConfigsChanged(() => { void loadConfigs() })
     void window.electronAPI.frpStatus().then(setStatus).catch(() => undefined)
+    void window.electronAPI.frpLogs().then(history => setLogs(live => mergeLogHistory(history, live))).catch(() => undefined)
     void loadConfigs()
     return () => { unsubLog(); unsubStatus(); unsubConfigs() }
   }, [])
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const terminal = logEndRef.current?.parentElement
+    terminal?.scrollTo({ top: terminal.scrollHeight, behavior: 'smooth' })
   }, [logs])
 
   async function loadConfigs() {
     const list = await window.electronAPI.frpConfigsList()
     setConfigs(list)
-    setSelectedId((current) => {
-      if (current && list.some((item) => item.id === current)) return current
-      return list[0]?.id || ''
-    })
+    setSelectedId(current => current && list.some(item => item.id === current) ? current : (list[0]?.id || ''))
   }
 
   async function handlePickConfig() {
@@ -90,13 +80,12 @@ export function FrpPage() {
   async function handleStartOrStop() {
     setActionError('')
     try {
-      if (status === 'running' || status === 'starting' || status === 'stopping') {
+      if (['running', 'starting', 'stopping'].includes(status)) {
         await window.electronAPI.frpStop()
-        return
+      } else if (selectedConfig) {
+        await window.electronAPI.frpConfigsStart(selectedConfig.id)
+        await loadConfigs()
       }
-      if (!selectedConfig) return
-      await window.electronAPI.frpConfigsStart(selectedConfig.id)
-      await loadConfigs()
     } catch (error: any) {
       setActionError(error?.message || '启动失败')
     }
@@ -113,163 +102,81 @@ export function FrpPage() {
     }
   }
 
-  const running = status === 'running' || status === 'starting' || status === 'stopping'
+  const running = ['running', 'starting', 'stopping'].includes(status)
+  const statusLabel = status === 'running' ? '运行中' : status === 'starting' ? '启动中' : status === 'stopping' ? '停止中' : status === 'error' ? '错误' : '未运行'
+
+  function summaryBadges(summary: ImportedFrpConfig['summary']) {
+    return (
+      <div className="config-summary__meta">
+        <Badge>代理 {summary.proxyName}</Badge>
+        <Badge>服务端 {summary.serverAddr || '未识别'}:{summary.serverPort}</Badge>
+        <Badge>本地 {summary.localPort}</Badge>
+        <Badge>远程 {summary.remotePort}</Badge>
+      </div>
+    )
+  }
 
   return (
-    <Box>
-      <Typography variant="h4" fontWeight={700} gutterBottom>
-        FRP 内网穿透
-      </Typography>
+    <div className="page-stack">
+      <section className="page-heading">
+        <div className="page-heading__copy"><h1 className="page-heading__title">FRP 内网穿透</h1></div>
+        <Badge tone={status === 'running' ? 'success' : status === 'error' ? 'danger' : 'neutral'}>{statusLabel}</Badge>
+      </section>
 
-      <Paper sx={{ p: 3, maxWidth: 860, mb: 2 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          {actionError && <Alert severity="error">{actionError}</Alert>}
+      {actionError ? <AlertBanner tone="danger">{actionError}</AlertBanner> : null}
 
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Button variant="outlined" startIcon={<FileOpen />} onClick={handlePickConfig}>
-              导入配置文件
-            </Button>
-            <Button
-              variant="contained"
-              color={running ? 'error' : 'primary'}
-              startIcon={running ? <Stop /> : <PlayArrow />}
-              onClick={handleStartOrStop}
-              disabled={!running && !selectedConfig}
-            >
-              {running ? '停止' : '启动所选配置'}
-            </Button>
-            <Button
-              variant="text"
-              color="error"
-              startIcon={<DeleteOutline />}
-              onClick={handleRemoveConfig}
-              disabled={!selectedConfig || running}
-            >
-              删除所选配置
-            </Button>
-            <Chip
-              label={status === 'running' ? '运行中' : status === 'starting' ? '启动中' : status === 'stopping' ? '停止中' : status === 'error' ? '错误' : '未运行'}
-              color={status === 'running' ? 'success' : status === 'error' ? 'error' : 'default'}
-            />
-          </Box>
+      <section className="section-stack">
+        <div className="toolbar">
+          <div className="toolbar__group">
+            <Button variant="secondary" startIcon={<FolderOpen />} onClick={handlePickConfig}>导入配置</Button>
+            <Button variant={running ? 'danger' : 'primary'} startIcon={running ? <Square /> : <Play />} onClick={handleStartOrStop} disabled={!running && !selectedConfig}>{running ? '停止' : '启动'}</Button>
+            <Button variant="ghost" startIcon={<Trash2 />} onClick={handleRemoveConfig} disabled={!selectedConfig || running}>删除配置</Button>
+          </div>
+        </div>
 
-          <FormControl size="small" fullWidth disabled={configs.length === 0}>
-            <InputLabel>选择配置</InputLabel>
-            <Select
-              value={selectedId}
-              label="选择配置"
-              onChange={(event) => setSelectedId(event.target.value)}
-            >
-              {configs.map((item) => (
-                <MenuItem key={item.id} value={item.id}>
-                  {item.name} ({item.fileName})
-                </MenuItem>
-              ))}
-              {configs.length === 0 && <MenuItem disabled value="">暂无已导入配置</MenuItem>}
-            </Select>
-          </FormControl>
+        <Field label="当前配置">
+          <select className="ui-select" value={selectedId} onChange={event => setSelectedId(event.target.value)} disabled={!configs.length}>
+            {!configs.length ? <option value="">暂无已导入配置</option> : null}
+            {configs.map(item => <option key={item.id} value={item.id}>{item.name} ({item.fileName})</option>)}
+          </select>
+        </Field>
 
-          {selectedConfig ? (
-            <Paper variant="outlined" sx={{ p: 2.5, bgcolor: '#fafafa' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-                <Box>
-                  <Typography variant="h6" fontWeight={700}>
-                    {selectedConfig.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {selectedConfig.filePath}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                  <Chip size="small" label={`代理: ${selectedConfig.summary.proxyName}`} />
-                  <Chip size="small" label={`服务端: ${selectedConfig.summary.serverAddr || '未识别'}:${selectedConfig.summary.serverPort}`} />
-                  <Chip size="small" label={`本地: ${selectedConfig.summary.localPort}`} />
-                  <Chip size="small" label={`远程: ${selectedConfig.summary.remotePort}`} />
-                  <Chip size="small" color={selectedConfig.summary.tokenConfigured ? 'success' : 'default'} label={selectedConfig.summary.tokenConfigured ? '已配置 Token' : '未识别 Token'} />
-                </Box>
-              </Box>
+        {selectedConfig ? (
+          <div className="config-summary stack stack--compact">
+            <div className="config-summary__header">
+              <div><strong>{selectedConfig.name}</strong><p className="config-summary__path">{selectedConfig.filePath}</p></div>
+              {summaryBadges(selectedConfig.summary)}
+            </div>
+            <div className="summary-line"><span>导入于 {formatDateTime(selectedConfig.importedAt)}</span><span>最近使用 {formatDateTime(selectedConfig.lastUsedAt)}</span></div>
+            {selectedConfig.warnings.map(warning => <AlertBanner key={warning} tone="warning">{warning}</AlertBanner>)}
+          </div>
+        ) : <AlertBanner tone="warning">暂无已导入配置。</AlertBanner>}
+      </section>
 
-              <Typography variant="body2" color="text.secondary">
-                导入时间：{formatDateTime(selectedConfig.importedAt)}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: selectedConfig.warnings.length ? 2 : 0 }}>
-                最近使用：{formatDateTime(selectedConfig.lastUsedAt)}
-              </Typography>
+      <section className="section-stack">
+        <div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">运行日志</h2></div></div>
+        <div className="terminal">
+          {logs.map((line, index) => <div className="terminal__line" key={index}>{line}</div>)}
+          <div ref={logEndRef} />
+        </div>
+      </section>
 
-              {selectedConfig.warnings.map((warning) => (
-                <Alert key={warning} severity="warning" sx={{ mt: 1 }}>
-                  {warning}
-                </Alert>
-              ))}
-            </Paper>
-          ) : (
-            <Alert severity="warning">
-              暂无已导入配置
-            </Alert>
-          )}
-        </Box>
-      </Paper>
-
-      <Paper
-        sx={{
-          maxWidth: 860,
-          height: 240,
-          overflow: 'auto',
-          p: 1.5,
-          fontFamily: 'Consolas, monospace',
-          fontSize: 12,
-          bgcolor: '#1a1a1a',
-          color: '#e0e0e0',
-          '&::-webkit-scrollbar': { width: 6 },
-          '&::-webkit-scrollbar-thumb': { bgcolor: '#555', borderRadius: 4 },
-        }}
+      <Dialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        title="保存导入的配置"
+        width="sm"
+        footer={<div className="dialog-actions"><Button variant="ghost" onClick={() => setImportDialogOpen(false)}>取消</Button><Button onClick={handleSaveImportedConfig} disabled={!configName.trim()}>保存到列表</Button></div>}
       >
-        {logs.length === 0 && <Typography sx={{ color: '#888' }}>启动后日志将显示在此处</Typography>}
-        {logs.map((line, index) => <div key={index} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{line}</div>)}
-        <div ref={logEndRef} />
-      </Paper>
-
-      <Dialog open={importDialogOpen} onClose={() => setImportDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>保存导入的配置</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            {importPreview && (
-              <>
-                <TextField
-                  label="配置名称"
-                  value={configName}
-                  onChange={(event) => setConfigName(event.target.value)}
-                  autoFocus
-                  fullWidth
-                />
-                <TextField
-                  label="配置文件路径"
-                  value={importPreview.filePath}
-                  InputProps={{ readOnly: true }}
-                  fullWidth
-                />
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  <Chip size="small" label={`代理: ${importPreview.summary.proxyName}`} />
-                  <Chip size="small" label={`服务端: ${importPreview.summary.serverAddr || '未识别'}:${importPreview.summary.serverPort}`} />
-                  <Chip size="small" label={`本地: ${importPreview.summary.localPort}`} />
-                  <Chip size="small" label={`远程: ${importPreview.summary.remotePort}`} />
-                </Box>
-                {importPreview.warnings.map((warning) => (
-                  <Alert key={warning} severity="warning">
-                    {warning}
-                  </Alert>
-                ))}
-              </>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setImportDialogOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleSaveImportedConfig} disabled={!configName.trim()}>
-            保存到配置列表
-          </Button>
-        </DialogActions>
+        {importPreview ? (
+          <div className="stack">
+            <Field label="配置名称"><input className="ui-input" value={configName} onChange={event => setConfigName(event.target.value)} autoFocus /></Field>
+            <Field label="配置文件路径"><input className="ui-input" value={importPreview.filePath} readOnly /></Field>
+            {summaryBadges(importPreview.summary)}
+            {importPreview.warnings.map(warning => <AlertBanner key={warning} tone="warning">{warning}</AlertBanner>)}
+          </div>
+        ) : null}
       </Dialog>
-    </Box>
+    </div>
   )
 }

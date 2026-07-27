@@ -1,17 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Memory, Refresh, Speed, Storage } from '@mui/icons-material'
-import {
-  Alert,
-  Box,
-  CircularProgress,
-  Grid,
-  IconButton,
-  LinearProgress,
-  Paper,
-  Stack,
-  Tooltip,
-  Typography,
-} from '@mui/material'
+import { Gauge, HardDrive, MemoryStick, RefreshCw } from 'lucide-react'
+import { AlertBanner, IconButton, ProgressBar, Spinner } from './ui'
+import { getActiveLanguage } from '../localization'
 
 interface Props {
   active: boolean
@@ -47,7 +37,7 @@ function formatPercent(value: number): string {
   return `${Math.min(100, Math.max(0, value || 0)).toFixed(1)}%`
 }
 
-function MetricCard({
+function MetricItem({
   icon,
   label,
   value,
@@ -64,29 +54,25 @@ function MetricCard({
 }) {
   const safeValue = Math.min(100, Math.max(0, value || 0))
   return (
-    <Paper variant="outlined" sx={{ p: 2, minHeight: 142, height: '100%' }}>
-      <Stack spacing={1.25} sx={{ height: '100%' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: `${color}.main` }}>
-          {icon}
-          <Typography variant="subtitle2" color="text.primary">{label}</Typography>
-          <Typography variant="h6" fontWeight={700} sx={{ ml: 'auto' }}>{formatPercent(safeValue)}</Typography>
-        </Box>
-        <LinearProgress variant="determinate" value={safeValue} color={color} sx={{ height: 7, borderRadius: 1 }} />
-        <Box sx={{ mt: 'auto' }}>
-          <Typography variant="body2" fontWeight={600}>{detail}</Typography>
-          <Typography variant="caption" color="text.secondary">{secondary}</Typography>
-        </Box>
-      </Stack>
-    </Paper>
+    <div className="metric-item">
+      <div className="metric-item__header">
+        <span className="metric-item__icon" aria-hidden="true">{icon}</span>
+        <span className="metric-item__label">{label}</span>
+        <span className="metric-item__value">{formatPercent(safeValue)}</span>
+      </div>
+      <ProgressBar value={safeValue} tone={color === 'primary' ? 'accent' : color} />
+      <p className="metric-item__detail">{detail}</p>
+      <p className="metric-item__secondary" title={secondary}>{secondary}</p>
+    </div>
   )
 }
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <Box sx={{ py: 1, minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
-      <Typography variant="body2" sx={{ mt: 0.25, wordBreak: 'break-word' }}>{value || '-'}</Typography>
-    </Box>
+    <div className="info-item">
+      <span className="info-item__label">{label}</span>
+      <span className="info-item__value">{value || '-'}</span>
+    </div>
   )
 }
 
@@ -94,102 +80,116 @@ export function LocalSystemMetrics({ active }: Props) {
   const [metrics, setMetrics] = useState<LocalSystemMetrics | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const requestInFlight = useRef(false)
+  const sessionRef = useRef(0)
+  const requestInFlight = useRef<Promise<LocalSystemMetrics> | null>(null)
 
-  const loadMetrics = useCallback(async () => {
-    if (requestInFlight.current) return
-    requestInFlight.current = true
+  const loadMetrics = useCallback(async (session: number, refreshDisk = false) => {
     setLoading(true)
     try {
-      setMetrics(await window.electronAPI.getLocalSystemMetrics())
+      let request = requestInFlight.current
+      if (!request) {
+        request = window.electronAPI.getLocalSystemMetrics({ refreshDisk })
+        requestInFlight.current = request
+        void request.finally(() => {
+          if (requestInFlight.current === request) requestInFlight.current = null
+        }).catch(() => undefined)
+      }
+
+      const nextMetrics = await request
+      if (sessionRef.current !== session) return
+      setMetrics(nextMetrics)
       setError('')
     } catch (loadError) {
+      if (sessionRef.current !== session) return
       setError(cleanError(loadError))
     } finally {
-      requestInFlight.current = false
-      setLoading(false)
+      if (sessionRef.current === session) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     if (!active) return
-    void loadMetrics()
-    const timer = window.setInterval(() => void loadMetrics(), 5000)
-    return () => window.clearInterval(timer)
+    const session = ++sessionRef.current
+    void loadMetrics(session)
+    const timer = window.setInterval(() => void loadMetrics(session), 5000)
+    return () => {
+      window.clearInterval(timer)
+      if (sessionRef.current === session) sessionRef.current += 1
+    }
   }, [active, loadMetrics])
 
   return (
-    <Box sx={{ mb: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-        <Typography variant="h6" fontWeight={700}>本机设备状态</Typography>
-        <Box sx={{ flexGrow: 1 }} />
-        {metrics && (
-          <Typography variant="caption" color="text.secondary">
-            {new Date(metrics.fetchedAt).toLocaleTimeString('zh-CN')}
-          </Typography>
-        )}
-        <Tooltip title="刷新设备状态">
-          <span>
-            <IconButton size="small" onClick={() => void loadMetrics()} disabled={loading} aria-label="刷新设备状态">
-              <Refresh />
-            </IconButton>
-          </span>
-        </Tooltip>
-      </Box>
+    <section className="section-stack">
+      <div className="section-heading">
+        <div className="section-heading__copy">
+          <h2 className="section-title">{'\u672C\u673A\u8BBE\u5907\u72B6\u6001'}</h2>
+        </div>
+        <div className="toolbar__group">
+          {metrics ? (
+            <span className="inline-meta">
+              {new Date(metrics.fetchedAt).toLocaleTimeString(getActiveLanguage())}
+            </span>
+          ) : null}
+          <IconButton
+            onClick={() => void loadMetrics(sessionRef.current, true)}
+            disabled={loading || !active}
+            loading={loading}
+            title={'\u5237\u65B0\u8BBE\u5907\u72B6\u6001'}
+            aria-label={'\u5237\u65B0\u8BBE\u5907\u72B6\u6001'}
+          >
+            <RefreshCw />
+          </IconButton>
+        </div>
+      </div>
 
-      {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
+      {error ? <AlertBanner tone="danger">{error}</AlertBanner> : null}
 
       {!metrics ? (
-        <Paper variant="outlined" sx={{ minHeight: 150, display: 'grid', placeItems: 'center' }}>
-          <CircularProgress size={30} />
-        </Paper>
+        <div className="empty-state"><div className="empty-state__content">
+          <Spinner size={26} />
+          <p className="empty-state__message">{'\u6B63\u5728\u8BFB\u53D6\u8BBE\u5907\u72B6\u6001...'}</p>
+        </div></div>
       ) : (
         <>
-          <Grid container spacing={1.5}>
-            <Grid item xs={12} sm={4}>
-              <MetricCard
-                icon={<Speed fontSize="small" />}
-                label="CPU"
-                value={metrics.cpu.usagePercent}
-                detail={`${metrics.cpu.physicalCores} 个物理核心 · ${metrics.cpu.cores} 个逻辑核心`}
-                secondary={metrics.cpu.model}
-                color="primary"
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <MetricCard
-                icon={<Memory fontSize="small" />}
-                label="内存"
-                value={metrics.memory.usagePercent}
-                detail={`${formatBytes(metrics.memory.usedBytes)} / ${formatBytes(metrics.memory.totalBytes)}`}
-                secondary={`可用 ${formatBytes(metrics.memory.availableBytes)}`}
-                color="success"
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <MetricCard
-                icon={<Storage fontSize="small" />}
-                label="系统盘"
-                value={metrics.disk.usagePercent}
-                detail={`${formatBytes(metrics.disk.usedBytes)} / ${formatBytes(metrics.disk.totalBytes)}`}
-                secondary={`可用 ${formatBytes(metrics.disk.availableBytes)}`}
-                color="warning"
-              />
-            </Grid>
-          </Grid>
+          <div className="metrics-block">
+          <div className="metrics-grid">
+            <MetricItem
+              icon={<Gauge />}
+              label="CPU"
+              value={metrics.cpu.usagePercent}
+              detail={`${metrics.cpu.physicalCores} \u4E2A\u7269\u7406\u6838\u5FC3 \u00B7 ${metrics.cpu.cores} \u4E2A\u903B\u8F91\u6838\u5FC3`}
+              secondary={metrics.cpu.model}
+              color="primary"
+            />
+            <MetricItem
+              icon={<MemoryStick />}
+              label={'\u5185\u5B58'}
+              value={metrics.memory.usagePercent}
+              detail={`${formatBytes(metrics.memory.usedBytes)} / ${formatBytes(metrics.memory.totalBytes)}`}
+              secondary={`${'\u53EF\u7528'} ${formatBytes(metrics.memory.availableBytes)}`}
+              color="success"
+            />
+            <MetricItem
+              icon={<HardDrive />}
+              label={'\u7CFB\u7EDF\u76D8'}
+              value={metrics.disk.usagePercent}
+              detail={`${formatBytes(metrics.disk.usedBytes)} / ${formatBytes(metrics.disk.totalBytes)}`}
+              secondary={`${'\u53EF\u7528'} ${formatBytes(metrics.disk.availableBytes)}`}
+              color="warning"
+            />
+          </div></div>
 
-          <Paper variant="outlined" sx={{ px: 2, py: 0.5, mt: 1.5 }}>
-            <Grid container columnSpacing={3}>
-              <Grid item xs={12} sm={4}><InfoItem label="设备" value={[metrics.manufacturer, metrics.model].filter(Boolean).join(' ')} /></Grid>
-              <Grid item xs={12} sm={4}><InfoItem label="主机名" value={metrics.hostname} /></Grid>
-              <Grid item xs={12} sm={4}><InfoItem label="运行时间" value={formatUptime(metrics.uptimeSeconds)} /></Grid>
-              <Grid item xs={12} sm={4}><InfoItem label="操作系统" value={metrics.osName} /></Grid>
-              <Grid item xs={12} sm={4}><InfoItem label="内核与架构" value={`${metrics.kernel} · ${metrics.architecture}`} /></Grid>
-              <Grid item xs={12} sm={4}><InfoItem label="系统盘" value={`${metrics.disk.mount} · ${metrics.disk.filesystem || '-'}`} /></Grid>
-            </Grid>
-          </Paper>
+          <div className="info-grid">
+              <InfoItem label={'\u8BBE\u5907'} value={[metrics.manufacturer, metrics.model].filter(Boolean).join(' ')} />
+              <InfoItem label={'\u4E3B\u673A\u540D'} value={metrics.hostname} />
+              <InfoItem label={'\u8FD0\u884C\u65F6\u95F4'} value={formatUptime(metrics.uptimeSeconds)} />
+              <InfoItem label={'\u64CD\u4F5C\u7CFB\u7EDF'} value={metrics.osName} />
+              <InfoItem label={'\u5185\u6838\u4E0E\u67B6\u6784'} value={`${metrics.kernel} \u00B7 ${metrics.architecture}`} />
+              <InfoItem label={'\u7CFB\u7EDF\u76D8'} value={`${metrics.disk.mount} \u00B7 ${metrics.disk.filesystem || '-'}`} />
+              <InfoItem label="BIOS" value={[metrics.bios.vendor, metrics.bios.version, metrics.bios.releaseDate].filter(Boolean).join(' \u00B7 ')} />
+          </div>
         </>
       )}
-    </Box>
+    </section>
   )
 }

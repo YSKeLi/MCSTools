@@ -9,9 +9,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startServer: (serverId: string, maxRam: number) => ipcRenderer.invoke('server:start', serverId, maxRam),
   stopServer: (serverId: string) => ipcRenderer.invoke('server:stop', serverId),
   forceStopServer: (serverId: string) => ipcRenderer.invoke('server:forceStop', serverId),
-  getServerStatus: () => ipcRenderer.invoke('server:status'),
+  getServerStatus: (serverId?: string) => ipcRenderer.invoke('server:status', serverId),
+  getServerLogs: (serverId: string) => ipcRenderer.invoke('server:logs', serverId),
+  getServerPlayers: () => ipcRenderer.invoke('server:players'),
+  getPlayerSkin: (playerName: string) => ipcRenderer.invoke('server:playerSkin', playerName),
   sendServerCommand: (serverId: string, cmd: string) => ipcRenderer.invoke('server:command', serverId, cmd),
-  getLocalSystemMetrics: () => ipcRenderer.invoke('system:getMetrics'),
+  getLocalSystemMetrics: (options?: { refreshDisk?: boolean }) => ipcRenderer.invoke('system:getMetrics', options),
 
   serversList: () => ipcRenderer.invoke('servers:list'),
   serversAdd: (s: any) => ipcRenderer.invoke('servers:add', s),
@@ -39,6 +42,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadJavaPackage: (packageId: string) => ipcRenderer.invoke('java:downloadPackage', packageId),
   detectServer: (dir: string) => ipcRenderer.invoke('server:detect', dir),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  getAppSettings: () => ipcRenderer.invoke('appSettings:get'),
+  updateAppSettings: (patch: any) => ipcRenderer.invoke('appSettings:update', patch),
+  selectBackgroundImage: () => ipcRenderer.invoke('appearance:selectBackgroundImage'),
+  clearBackgroundImage: () => ipcRenderer.invoke('appearance:clearBackgroundImage'),
   checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
   downloadAndInstallUpdate: () => ipcRenderer.invoke('app:downloadAndInstallUpdate'),
   openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
@@ -48,6 +55,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   remoteServersAdd: (input: any) => ipcRenderer.invoke('remoteServers:add', input),
   remoteServersRemove: (id: string) => ipcRenderer.invoke('remoteServers:remove', id),
   remoteServerGetMetrics: (id: string) => ipcRenderer.invoke('remoteServers:getMetrics', id),
+  remoteMinecraftServersList: (remoteServerId: string) => ipcRenderer.invoke('remoteMinecraft:list', remoteServerId),
+  remoteMinecraftFindDirectories: (remoteServerId: string) => ipcRenderer.invoke('remoteMinecraft:findDirectories', remoteServerId),
+  remoteMinecraftInspectDirectory: (remoteServerId: string, remotePath: string) => ipcRenderer.invoke('remoteMinecraft:inspectDirectory', remoteServerId, remotePath),
+  remoteMinecraftBrowseDirectory: (remoteServerId: string, remotePath?: string) => ipcRenderer.invoke('remoteMinecraft:browseDirectory', remoteServerId, remotePath),
+  remoteMinecraftServersAdd: (remoteServerId: string, input: any) => ipcRenderer.invoke('remoteMinecraft:add', remoteServerId, input),
+  remoteMinecraftServersRemove: (remoteServerId: string, minecraftServerId: string) => ipcRenderer.invoke('remoteMinecraft:remove', remoteServerId, minecraftServerId),
+  remoteMinecraftServerUpdate: (remoteServerId: string, minecraftServerId: string, maxRam: number) => ipcRenderer.invoke('remoteMinecraft:update', remoteServerId, minecraftServerId, maxRam),
+  remoteMinecraftServerStatus: (remoteServerId: string, minecraftServerId: string) => ipcRenderer.invoke('remoteMinecraft:status', remoteServerId, minecraftServerId),
+  remoteMinecraftServerLogs: (remoteServerId: string, minecraftServerId: string) => ipcRenderer.invoke('remoteMinecraft:logs', remoteServerId, minecraftServerId),
+  remoteMinecraftServerStart: (remoteServerId: string, minecraftServerId: string, maxRam: number) => ipcRenderer.invoke('remoteMinecraft:start', remoteServerId, minecraftServerId, maxRam),
+  remoteMinecraftServerStop: (remoteServerId: string, minecraftServerId: string, force = false) => ipcRenderer.invoke('remoteMinecraft:stop', remoteServerId, minecraftServerId, force),
+  remoteMinecraftServerCommand: (remoteServerId: string, minecraftServerId: string, command: string) => ipcRenderer.invoke('remoteMinecraft:command', remoteServerId, minecraftServerId, command),
+  remoteMinecraftServerReadProperties: (remoteServerId: string, minecraftServerId: string) => ipcRenderer.invoke('remoteMinecraft:readProperties', remoteServerId, minecraftServerId),
+  remoteMinecraftServerWriteProperties: (remoteServerId: string, minecraftServerId: string, content: string) => ipcRenderer.invoke('remoteMinecraft:writeProperties', remoteServerId, minecraftServerId, content),
 
   onServerLog: (callback: (event: any) => void) => {
     const h = (_: any, event: any) => callback(event)
@@ -58,6 +79,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const h = (_: any, state: any) => callback(state)
     ipcRenderer.on('server:status', h)
     return () => { ipcRenderer.removeListener('server:status', h) }
+  },
+  onServerPlayers: (callback: (snapshot: any) => void) => {
+    const h = (_: any, snapshot: any) => callback(snapshot)
+    ipcRenderer.on('server:players', h)
+    return () => { ipcRenderer.removeListener('server:players', h) }
   },
   onDownloadProgress: (callback: (p: any) => void) => {
     const h = (_: any, p: any) => callback(p)
@@ -77,6 +103,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   frpStop: () => ipcRenderer.invoke('frp:stop'),
   frpStatus: () => ipcRenderer.invoke('frp:status'),
+  frpLogs: () => ipcRenderer.invoke('frp:logs'),
   frpConfigsList: () => ipcRenderer.invoke('frpConfigs:list'),
   frpConfigsPickFile: () => ipcRenderer.invoke('frpConfigs:pickFile'),
   frpConfigsAdd: (name: string, filePath: string) => ipcRenderer.invoke('frpConfigs:add', name, filePath),

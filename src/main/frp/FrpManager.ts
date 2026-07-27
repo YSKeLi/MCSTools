@@ -1,8 +1,9 @@
-import { ChildProcess, execFileSync, spawn } from 'child_process'
+import { execFileSync } from 'child_process'
 import { createHash } from 'crypto'
 import { app, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
+import { PersistentProcessController } from '../runtime/PersistentProcessController'
 import { downloadFile } from '../utils/download'
 
 export interface FrpConfig {
@@ -43,17 +44,34 @@ const FRP_ARCHIVE_SHA256: Record<string, string> = {
 }
 
 export class FrpManager {
-  private process: ChildProcess | null = null
   private mainWindow: BrowserWindow | null = null
   private currentStatus = 'stopped'
-  private forceStopTimer: NodeJS.Timeout | null = null
+  private readonly runtimeDirectory: string
+  private readonly logPath: string
+  private readonly controller: PersistentProcessController
+
+  constructor() {
+    this.runtimeDirectory = path.join(app.getPath('userData'), 'managed-processes', 'frp')
+    this.logPath = path.join(this.runtimeDirectory, 'frp.log')
+    this.controller = new PersistentProcessController({
+      runtimeDirectory: this.runtimeDirectory,
+      service: 'frp',
+      onLog: line => this.emitLog(line, false),
+      onState: state => this.emitStatus(state.status),
+    })
+    this.currentStatus = this.controller.getState()?.status || 'stopped'
+  }
 
   setWindow(win: BrowserWindow) { this.mainWindow = win }
 
-  get running() { return this.process !== null }
-  get status() { return this.currentStatus }
+  get running() { return this.controller.isRunning() }
+  get status() { return this.controller.getState()?.status || this.currentStatus }
+  get logs() { return this.controller.getLogs(this.logPath) }
 
-  private emitLog(line: string) { this.mainWindow?.webContents.send('frp:log', line) }
+  private emitLog(line: string, persist = true) {
+    if (persist) this.controller.appendLog(line, this.logPath)
+    else this.mainWindow?.webContents.send('frp:log', line)
+  }
   private emitStatus(s: string) {
     this.currentStatus = s
     this.mainWindow?.webContents.send('frp:status', s)
@@ -259,13 +277,13 @@ remotePort = ${config.remotePort || config.localPort}
     }
   }
 
-  async startFromFile(configFilePath: string) {
+  async startFromFile(configFilePath: string, serviceId = configFilePath) {
     if (this.running) return
 
     try {
       if (!fs.existsSync(configFilePath)) throw new Error('导入的配置文件不存在')
       const frpcPath = await this.ensureBinary(this.mainWindow || undefined)
-      await this.spawnProcess(frpcPath, configFilePath, `使用导入配置启动 -> ${configFilePath}`)
+      await this.spawnProcess(frpcPath, configFilePath, `使用导入配置启动 -> ${configFilePath}`, serviceId)
     } catch (e: any) {
       this.emitLog(`[FRP] 错误: ${e.message}`)
       this.emitStatus('error')
@@ -285,54 +303,24 @@ remotePort = ${config.remotePort || config.localPort}
     }
   }
 
-  private async spawnProcess(frpcPath: string, configPath: string, message: string) {
-    this.emitStatus('starting')
-    this.emitLog(`[FRP] ${message}`)
-    this.emitLog(`[FRP] frpc 目录: ${this.getFrpcDir()}`)
-
-    this.process = spawn(frpcPath, ['-c', configPath], {
+  private async spawnProcess(frpcPath: string, configPath: string, message: string, serviceId = configPath) {
+    await this.controller.start({
+      service: 'frp',
+      serviceId,
+      executable: frpcPath,
+      args: ['-c', configPath],
       cwd: path.dirname(configPath),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-
-    this.process.stdout?.on('data', (data: Buffer) => {
-      data.toString().split('\n').filter(Boolean).forEach(l => this.emitLog(`[FRP] ${l}`))
-    })
-
-    this.process.stderr?.on('data', (data: Buffer) => {
-      data.toString().split('\n').filter(Boolean).forEach(l => this.emitLog(`[FRP] ${l}`))
-    })
-
-    const child = this.process
-    child.on('close', (code) => {
-      if (this.process !== child) return
-      if (this.forceStopTimer) clearTimeout(this.forceStopTimer)
-      this.forceStopTimer = null
-      this.emitLog(`[FRP] 进程退出 (code: ${code})`)
-      this.emitStatus('stopped')
-      this.process = null
-    })
-
-    await new Promise<void>((resolve, reject) => {
-      const onSpawn = () => {
-        child.off('error', onError)
-        child.on('error', error => {
-          if (this.process !== child) return
-          this.emitLog(`[FRP] 进程错误: ${error.message}`)
-          this.emitStatus('error')
-        })
-        this.emitStatus('running')
-        resolve()
-      }
-      const onError = (error: Error) => {
-        child.off('spawn', onSpawn)
-        if (this.process === child) this.process = null
-        this.emitLog(`[FRP] 启动失败: ${error.message}`)
-        this.emitStatus('error')
-        reject(error)
-      }
-      child.once('spawn', onSpawn)
-      child.once('error', onError)
+      logPath: this.logPath,
+      stdoutPrefix: '[FRP] ',
+      stderrPrefix: '[FRP] ',
+      stopMode: 'signal',
+      stopTimeoutMs: 5000,
+      initialLogs: [
+        '',
+        `[FRP] ===== 新会话 ${new Date().toLocaleString('zh-CN', { hour12: false })} =====`,
+        `[FRP] ${message}`,
+        `[FRP] frpc 目录: ${this.getFrpcDir()}`,
+      ],
     })
   }
 
@@ -424,33 +412,11 @@ remotePort = ${config.remotePort || config.localPort}
   }
 
   stop() {
-    if (!this.running || !this.process) return
-    const child = this.process
-    this.emitLog('[FRP] 正在停止...')
-    this.emitStatus('stopping')
-    this.process.kill('SIGTERM')
-    if (this.forceStopTimer) clearTimeout(this.forceStopTimer)
-    this.forceStopTimer = setTimeout(() => {
-      if (this.process === child) {
-        child.kill('SIGKILL')
-        this.emitLog('[FRP] 强制终止')
-      }
-    }, 5000)
+    if (!this.running) return
+    this.controller.stop(false)
   }
 
   async shutdown(): Promise<void> {
-    if (!this.process) return
-    const child = this.process
-    this.stop()
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        if (this.process === child) child.kill('SIGKILL')
-        resolve()
-      }, 3000)
-      child.once('close', () => {
-        clearTimeout(timer)
-        resolve()
-      })
-    })
+    this.controller.dispose()
   }
 }

@@ -7,6 +7,14 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+if (-not $env:ELECTRON_MIRROR) {
+    $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+}
+
+if (-not $env:ELECTRON_BUILDER_BINARIES_MIRROR) {
+    $env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
+}
+
 Write-Host "[1/3] Building code..." -ForegroundColor Cyan
 npm run build
 
@@ -19,10 +27,10 @@ if ($AllowUnsigned) {
 } else {
     Remove-Item Env:CSC_IDENTITY_AUTO_DISCOVERY -ErrorAction SilentlyContinue
 }
-npx electron-builder --win --x64
+node scripts/run-electron-builder.cjs --win --x64
 
 Write-Host "[3/3] Building Windows arm64 installer..." -ForegroundColor Cyan
-npx electron-builder --win --arm64
+node scripts/run-electron-builder.cjs --win --arm64
 
 Write-Host "Done! Installers are in release/ folder" -ForegroundColor Green
 pause

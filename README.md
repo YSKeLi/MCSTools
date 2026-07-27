@@ -125,7 +125,7 @@ Java 下载包和具体发行包会根据当前系统与处理器架构自动匹
 
 ### 开发环境
 
-需要安装 Node.js 和 npm：
+需要安装 Node.js 22 或更高版本，以及 npm 10 或更高版本：
 
 ```bash
 git clone https://github.com/YSKeLi/MCSTools.git
@@ -137,10 +137,10 @@ npm run dev
 ### 常用命令
 
 ```bash
-npm run typecheck   # 类型检查
+npm run verify      # 类型检查并运行测试
 npm test            # 构建主进程并运行测试
 npm run build       # 构建主进程和渲染进程
-npm run dist        # 构建完整发行包
+npm run dist        # 构建当前平台发行包
 ```
 
 Windows 构建命令：
@@ -153,6 +153,8 @@ npm run dist:win:unsigned
 构建产物默认输出到 `release/`。开发环境生成的主进程文件位于 `dist/`。
 
 ---
+
+
 
 ## 常见问题
 
@@ -202,7 +204,7 @@ npm run dist:win:unsigned
 ```text
 MCServerTools/
 ├── src/main/       # Electron 主进程、服务器、Java、FRP、更新和远程连接逻辑
-├── src/renderer/   # React + Material UI 界面
+├── src/renderer/   # React 界面、样式和本地化
 ├── public/         # 图标和静态资源
 ├── scripts/        # 构建脚本
 ├── tests/          # 自动化测试
@@ -226,7 +228,7 @@ MCServerTools/
 - [MSL 开服器](https://www.mslmc.cn/)：提供 Minecraft 服务端核心列表、版本信息和下载镜像支持
 - [frp](https://github.com/fatedier/frp)：内网穿透支持
 - [PaperMC](https://papermc.io/)、[Purpur](https://purpurmc.org/)、[Fabric](https://fabricmc.net/) 等社区：服务端核心和生态支持
-- [Material UI](https://mui.com/)：界面组件库
+- [Lucide](https://lucide.dev/)：图标支持
 - [ssh2](https://github.com/mscdex/ssh2)：SSH 连接支持
 - [systeminformation](https://github.com/sebhildebrandt/systeminformation)：本机系统信息支持
 

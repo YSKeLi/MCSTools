@@ -7,6 +7,11 @@ export interface LocalSystemMetrics {
   osName: string
   kernel: string
   uptimeSeconds: number
+  bios: {
+    vendor: string
+    version: string
+    releaseDate: string
+  }
   cpu: {
     model: string
     cores: number

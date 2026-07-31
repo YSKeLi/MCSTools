@@ -26,7 +26,7 @@ export class NeoForgeProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'neoforge', name: 'NeoForge', type: 'modded',
     description: 'Forge 的下一代分支，社区驱动开发',
-    color: '#00BCD4', iconUrl: '/icons/neoforge.ico',
+    color: '#00BCD4', iconUrl: './icons/neoforge.ico',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {

@@ -7,6 +7,7 @@ import { getFrpConfig, listFrpConfigs, markFrpConfigUsed, removeFrpConfig, saveF
 import { FrpManager } from './frp/FrpManager'
 import { detectJava, downloadJavaPackage, getJava21OfficialPage, getJava21Packages, getJavaSystemProfile, openJavaDownload } from './java'
 import { RemoteServerService } from './remote/RemoteServerService'
+import { MAX_REMOTE_PRIVATE_KEY_BYTES } from './remote/remoteAuthPolicy'
 import { assertManagedServerDirectory, normalizeFsPath, writeServerMarker } from './security/pathPolicy'
 import { ServerManager } from './server/ServerManager'
 import { PlayerSkinService } from './server/PlayerSkinService'
@@ -79,6 +80,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, settingsActions?:
   currentWindow = mainWindow
   serverManager.setWindow(mainWindow)
   frpManager.setWindow(mainWindow)
+  remoteServerService.setWindow(mainWindow)
   if (ipcRegistered) return
   ipcRegistered = true
 
@@ -210,6 +212,22 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, settingsActions?:
     })
     return result.canceled ? null : result.filePaths[0]
   })
+  ipcMain.handle('dialog:selectPrivateKey', async () => {
+    const result = await dialog.showOpenDialog(windowOrThrow(), {
+      properties: ['openFile'],
+      filters: [
+        { name: 'SSH 私钥', extensions: ['pem', 'key', 'ppk'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const filePath = path.resolve(result.filePaths[0])
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_REMOTE_PRIVATE_KEY_BYTES) {
+      throw new Error('私钥文件无效或超过 256 KiB')
+    }
+    return { name: path.basename(filePath), content: fs.readFileSync(filePath, 'utf8') }
+  })
 
   ipcMain.handle('server:detect', (_event, directory: string) => detectServer(assertApprovedDirectory(directory)))
 
@@ -308,6 +326,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, settingsActions?:
   ipcMain.handle('remoteMinecraft:command', (_event, remoteServerId: string, minecraftServerId: string, command: string) => remoteServerService.sendMinecraftServerCommand(remoteServerId, minecraftServerId, command))
   ipcMain.handle('remoteMinecraft:readProperties', (_event, remoteServerId: string, minecraftServerId: string) => remoteServerService.readMinecraftServerProperties(remoteServerId, minecraftServerId))
   ipcMain.handle('remoteMinecraft:writeProperties', (_event, remoteServerId: string, minecraftServerId: string, content: string) => remoteServerService.writeMinecraftServerProperties(remoteServerId, minecraftServerId, content))
+  ipcMain.handle('remoteDeployment:preflight', (_event, remoteServerId: string, input) => remoteServerService.preflightDeployment(remoteServerId, input))
+  ipcMain.handle('remoteDeployment:start', (_event, remoteServerId: string, input) => remoteServerService.startDeployment(remoteServerId, input))
+  ipcMain.handle('remoteDeployment:list', (_event, remoteServerId: string) => remoteServerService.listDeploymentJobs(remoteServerId))
+  ipcMain.handle('remoteDeployment:cancel', (_event, remoteServerId: string, jobId: string) => remoteServerService.cancelDeployment(remoteServerId, jobId))
 }
 
 export async function shutdownServices(): Promise<void> {

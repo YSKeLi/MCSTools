@@ -27,6 +27,14 @@ interface DownloadResponse {
   }
 }
 
+export interface CoreDownloadArtifact {
+  coreId: string
+  version: string
+  fileName: string
+  url: string
+  sha256?: string
+}
+
 const MIRRORS_API = 'https://api.mslmc.cn/v4/mirrors'
 const DOWNLOAD_API = 'https://api.mslmc.cn/v4/download/server'
 
@@ -145,16 +153,16 @@ function inferVersionType(version: string): CoreVersion['type'] {
 
 function getCoreIconUrl(coreId: string): string | undefined {
   const iconMap: Record<string, string> = {
-    vanilla: '/icons/vanilla.ico',
-    paper: '/icons/paper.ico',
-    purpur: '/icons/purpur.ico',
-    forge: '/icons/forge.ico',
-    fabric: '/icons/fabric.svg',
-    neoforge: '/icons/neoforge.ico',
-    mohist: '/icons/mohist.png',
-    spongevanilla: '/icons/sponge.ico',
-    bukkit: '/icons/craftbukkit.ico',
-    spigot: '/icons/spigot.svg',
+    vanilla: './icons/vanilla.ico',
+    paper: './icons/paper.ico',
+    purpur: './icons/purpur.ico',
+    forge: './icons/forge.ico',
+    fabric: './icons/fabric.svg',
+    neoforge: './icons/neoforge.ico',
+    mohist: './icons/mohist.png',
+    spongevanilla: './icons/sponge.ico',
+    bukkit: './icons/craftbukkit.ico',
+    spigot: './icons/spigot.svg',
   }
 
   return iconMap[coreId]
@@ -171,7 +179,8 @@ function getDownloadFileName(coreId: string, version: string, downloadUrl: strin
     }
 
     const format = parsed.searchParams.get('format')
-    if (format) return `${coreId}-${version}.${format}`
+    const category = parsed.searchParams.get('category')
+    if (format) return `${coreId}-${version}${category ? `-${category}` : ''}.${format}`
     if (pathname.endsWith('/jar')) return `${coreId}-${version}.jar`
   } catch {
     // ignore
@@ -216,20 +225,21 @@ export async function getVersions(id: string): Promise<CoreVersion[]> {
   }))
 }
 
-export async function downloadCore(id: string, version: string, destDir: string, win?: BrowserWindow): Promise<string> {
+export async function getCoreDownloadArtifact(id: string, version: string): Promise<CoreDownloadArtifact> {
   const response = await fetchJson<DownloadResponse>(`${DOWNLOAD_API}/${id}/${encodeURIComponent(version)}`)
   if (response.code !== 200 || !response.data?.url) {
     throw new Error(response.message || `获取 ${id} ${version} 下载地址失败`)
   }
 
   const fileName = getDownloadFileName(id, version, response.data.url)
-  const filePath = path.join(destDir, fileName)
   const expectedSha256 = response.data.sha256?.replace(/^sha256:/i, '').trim().toLowerCase()
-  if (!expectedSha256 || !/^[a-f0-9]{64}$/.test(expectedSha256)) {
-    throw new Error('下载源未提供有效的 SHA-256 校验值，已拒绝下载')
-  }
-  await downloadFile(response.data.url, filePath, win, {
-    expectedSha256,
-  })
+  if (expectedSha256 && !/^[a-f0-9]{64}$/.test(expectedSha256)) throw new Error('下载源提供了无效的 SHA-256 校验值')
+  return { coreId: id, version, fileName, url: response.data.url, sha256: expectedSha256 }
+}
+
+export async function downloadCore(id: string, version: string, destDir: string, win?: BrowserWindow): Promise<string> {
+  const artifact = await getCoreDownloadArtifact(id, version)
+  const filePath = path.join(destDir, artifact.fileName)
+  await downloadFile(artifact.url, filePath, win, { expectedSha256: artifact.sha256 })
   return filePath
 }

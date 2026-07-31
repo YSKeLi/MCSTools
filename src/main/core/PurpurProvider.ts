@@ -7,7 +7,7 @@ export class PurpurProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'purpur', name: 'Purpur', type: 'bukkit',
     description: 'Paper 分支，提供更多自定义配置选项',
-    color: '#9C27B0', iconUrl: '/icons/purpur.ico',
+    color: '#9C27B0', iconUrl: './icons/purpur.ico',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {

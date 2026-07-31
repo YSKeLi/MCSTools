@@ -46,6 +46,12 @@ function normalizedMaxRam(value: unknown): number {
   return Math.max(512, Math.min(131072, Math.round(parsed)))
 }
 
+function normalizedIconUrl(value: unknown): string | undefined {
+  const iconUrl = text(value)
+  if (iconUrl.startsWith('/icons/')) return `.${iconUrl}`
+  return iconUrl || undefined
+}
+
 function normalizeStoredServer(
   value: unknown,
   generateId: () => string,
@@ -72,7 +78,7 @@ function normalizeStoredServer(
     coreName: textOr(item.coreName, '未知'),
     version: textOr(item.version, '未知'),
     jarName,
-    iconUrl: text(item.iconUrl) || undefined,
+    iconUrl: normalizedIconUrl(item.iconUrl),
     createdAt: text(item.createdAt) || now(),
     maxRam: normalizedMaxRam(item.maxRam),
     javaPath: text(item.javaPath) || undefined,

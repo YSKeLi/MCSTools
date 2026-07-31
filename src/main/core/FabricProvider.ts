@@ -7,7 +7,7 @@ export class FabricProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'fabric', name: 'Fabric', type: 'modded',
     description: '轻量级 Mod 加载器，加载快，版本更新迅速',
-    color: '#2196F3', iconUrl: '/icons/fabric.svg',
+    color: '#2196F3', iconUrl: './icons/fabric.svg',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {

@@ -10,7 +10,7 @@ export class ForgeProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'forge', name: 'Forge', type: 'modded',
     description: '最流行的 Mod 加载器，支持大量 Mod',
-    color: '#E65100', iconUrl: '/icons/forge.ico',
+    color: '#E65100', iconUrl: './icons/forge.ico',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {

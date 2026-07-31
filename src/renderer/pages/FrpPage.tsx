@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FolderOpen, Play, Square, Trash2 } from 'lucide-react'
 import { AlertBanner, Badge, Button, Dialog, Field } from '../components/ui'
 import { getActiveLanguage } from '../localization'
@@ -29,7 +29,8 @@ export function FrpPage() {
   const [importPreview, setImportPreview] = useState<ImportedFrpConfig | null>(null)
   const [configName, setConfigName] = useState('')
   const [actionError, setActionError] = useState('')
-  const logEndRef = useRef<HTMLDivElement>(null)
+  const terminalRef = useRef<HTMLDivElement>(null)
+  const followLatestLogsRef = useRef(true)
 
   const selectedConfig = useMemo(() => configs.find(item => item.id === selectedId) || null, [configs, selectedId])
 
@@ -43,10 +44,20 @@ export function FrpPage() {
     return () => { unsubLog(); unsubStatus(); unsubConfigs() }
   }, [])
 
-  useEffect(() => {
-    const terminal = logEndRef.current?.parentElement
-    terminal?.scrollTo({ top: terminal.scrollHeight, behavior: 'smooth' })
+  useLayoutEffect(() => {
+    if (!followLatestLogsRef.current) return undefined
+    const terminal = terminalRef.current
+    if (!terminal) return undefined
+    const scrollToLatest = () => { terminal.scrollTop = terminal.scrollHeight }
+    scrollToLatest()
+    const frame = window.requestAnimationFrame(scrollToLatest)
+    return () => window.cancelAnimationFrame(frame)
   }, [logs])
+
+  function handleTerminalScroll(event: React.UIEvent<HTMLDivElement>) {
+    const terminal = event.currentTarget
+    followLatestLogsRef.current = terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop <= 32
+  }
 
   async function loadConfigs() {
     const list = await window.electronAPI.frpConfigsList()
@@ -155,9 +166,8 @@ export function FrpPage() {
 
       <section className="section-stack">
         <div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">运行日志</h2></div></div>
-        <div className="terminal">
+        <div className="terminal terminal--large" ref={terminalRef} onScroll={handleTerminalScroll}>
           {logs.map((line, index) => <div className="terminal__line" key={index}>{line}</div>)}
-          <div ref={logEndRef} />
         </div>
       </section>
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowUp, File, Folder, FolderSearch, Gauge, HardDrive, MemoryStick, Play, Plus, Power, RefreshCw, Send, Square, Trash2 } from 'lucide-react'
+import { ArrowUp, Download, File, Folder, FolderSearch, Gauge, HardDrive, MemoryStick, Play, Plus, Power, RefreshCw, Send, Square, Trash2, X } from 'lucide-react'
 import { AlertBanner, Badge, Button, Dialog, Field, IconButton, ProgressBar, Spinner, Toggle } from '../components/ui'
 import { OnlinePlayers } from '../components/OnlinePlayers'
 import { getActiveLanguage } from '../localization'
@@ -39,6 +39,39 @@ function formatUptime(seconds: number): string {
   if (days > 0) return `${days} 天 ${hours} 小时`
   if (hours > 0) return `${hours} 小时 ${minutes} 分钟`
   return `${minutes} 分钟`
+}
+
+function deploymentPhaseLabel(phase: RemoteDeploymentPhase): string {
+  const labels: Record<RemoteDeploymentPhase, string> = {
+    queued: '排队中', preflight: '环境检查', downloading: '下载核心', uploading: '上传核心',
+    verifying: '完整性校验', installing: '安装核心', configuring: '写入配置', registering: '注册实例',
+    starting: '启动服务器', completed: '已完成', failed: '失败', cancelled: '已取消',
+  }
+  return labels[phase]
+}
+
+function deploymentTone(phase: RemoteDeploymentPhase): 'neutral' | 'accent' | 'success' | 'danger' {
+  if (phase === 'completed') return 'success'
+  if (phase === 'failed' || phase === 'cancelled') return 'danger'
+  if (phase === 'queued') return 'neutral'
+  return 'accent'
+}
+
+function deploymentActive(phase: RemoteDeploymentPhase): boolean {
+  return !['completed', 'failed', 'cancelled'].includes(phase)
+}
+
+function deploymentArtifactLabel(kind: RemoteDeploymentArtifactKind): string {
+  if (kind === 'direct-jar') return '可运行 JAR'
+  if (kind === 'java-installer') return 'Java 安装器'
+  if (kind === 'archive') return '服务端压缩包'
+  return '不支持的格式'
+}
+
+function remoteLaunchLabel(launch: RemoteMinecraftLaunchSpec): string {
+  if (launch.kind === 'java-args') return `参数文件 · ${launch.target}`
+  if (launch.kind === 'native') return `原生程序 · ${launch.target}`
+  return `JAR · ${launch.target}`
 }
 
 function MetricItem({ icon, label, value, detail, secondary, tone }: { icon: React.ReactNode; label: string; value: number; detail: string; secondary: string; tone: 'accent' | 'success' | 'warning' }) {
@@ -102,6 +135,18 @@ export function RemoteServerDetailPage({ active, remoteServerId }: Props) {
   const [browserLoading, setBrowserLoading] = useState(false)
   const [browserError, setBrowserError] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deploymentOpen, setDeploymentOpen] = useState(false)
+  const [deploymentCores, setDeploymentCores] = useState<CoreInfo[]>([])
+  const [deploymentVersions, setDeploymentVersions] = useState<CoreVersion[]>([])
+  const [deploymentForm, setDeploymentForm] = useState<RemoteDeploymentInput>({
+    name: '', targetPath: '', coreId: '', coreName: '', version: '', remark: '',
+    maxRam: 2048, serverPort: 25565, eulaAccepted: false, startAfterDeploy: true,
+  })
+  const [deploymentPreflight, setDeploymentPreflight] = useState<RemoteDeploymentPreflight | null>(null)
+  const [deploymentJobs, setDeploymentJobs] = useState<RemoteDeploymentJob[]>([])
+  const [deploymentJobId, setDeploymentJobId] = useState('')
+  const [deploymentLoading, setDeploymentLoading] = useState(false)
+  const [deploymentError, setDeploymentError] = useState('')
   const terminalRef = useRef<HTMLDivElement>(null)
   const followLatestLogsRef = useRef(true)
   const pollInFlight = useRef(false)
@@ -112,6 +157,8 @@ export function RemoteServerDetailPage({ active, remoteServerId }: Props) {
   const processActive = managedRunning || externalRunning
   const statusLabel = managedRunning || externalRunning ? '运行中' : status === 'error' ? '错误' : '未运行'
   const onlinePlayers = inferOnlinePlayers(logs)
+  const deploymentJob = deploymentJobs.find(job => job.id === deploymentJobId) || null
+  const visibleDeploymentJobs = deploymentJobs.filter(job => deploymentActive(job.phase) || job.phase === 'failed').slice(0, 3)
 
   const loadHost = useCallback(async () => {
     const nextHost = (await window.electronAPI.remoteServersList()).find(item => item.id === remoteServerId) || null
@@ -123,6 +170,10 @@ export function RemoteServerDetailPage({ active, remoteServerId }: Props) {
     const next = await window.electronAPI.remoteMinecraftServersList(remoteServerId)
     setInstances(next)
     setCurrentId(value => next.some(item => item.id === value) ? value : (next[0]?.id || ''))
+  }, [remoteServerId])
+
+  const loadDeploymentJobs = useCallback(async () => {
+    setDeploymentJobs(await window.electronAPI.remoteDeploymentJobs(remoteServerId))
   }, [remoteServerId])
 
   const loadMetrics = useCallback(async (quiet = false) => {
@@ -178,10 +229,20 @@ export function RemoteServerDetailPage({ active, remoteServerId }: Props) {
     if (!active || !remoteServerId) return
     void loadHost()
     void loadInstances().catch(loadError => setError(cleanError(loadError)))
+    void loadDeploymentJobs().catch(() => undefined)
     void loadMetrics()
     const timer = window.setInterval(() => void loadMetrics(true), 10000)
     return () => window.clearInterval(timer)
-  }, [active, remoteServerId, loadHost, loadInstances, loadMetrics])
+  }, [active, remoteServerId, loadHost, loadInstances, loadDeploymentJobs, loadMetrics])
+
+  useEffect(() => window.electronAPI.onRemoteDeploymentProgress(job => {
+    if (job.remoteServerId !== remoteServerId) return
+    setDeploymentJobs(current => [job, ...current.filter(item => item.id !== job.id)]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt)))
+    if (job.phase === 'completed' && job.minecraftServerId) {
+      void loadInstances().then(() => setCurrentId(job.minecraftServerId || ''))
+    }
+  }), [loadInstances, remoteServerId])
 
   useEffect(() => {
     setLogs([])
@@ -217,6 +278,82 @@ export function RemoteServerDetailPage({ active, remoteServerId }: Props) {
   function handleTerminalScroll(event: React.UIEvent<HTMLDivElement>) {
     const terminal = event.currentTarget
     followLatestLogsRef.current = terminal.scrollHeight - terminal.clientHeight - terminal.scrollTop <= 32
+  }
+
+  async function openDeploymentDialog() {
+    const username = (host?.username || '').replace(/[^A-Za-z0-9._-]/g, '')
+    const basePath = host?.os === 'windows'
+      ? 'C:/Minecraft'
+      : host?.os === 'macos'
+        ? `/Users/${username || 'Shared'}/Minecraft`
+        : username === 'root'
+          ? '/root/minecraft'
+          : `/home/${username || 'minecraft'}/minecraft`
+    setDeploymentForm({
+      name: '', targetPath: `${basePath}/new-server`, coreId: '', coreName: '', version: '', remark: '',
+      maxRam: 2048, serverPort: 25565, eulaAccepted: false, startAfterDeploy: true,
+    })
+    setDeploymentVersions([])
+    setDeploymentPreflight(null)
+    setDeploymentJobId('')
+    setDeploymentError('')
+    setDeploymentOpen(true)
+    if (deploymentCores.length) return
+    setDeploymentLoading(true)
+    try { setDeploymentCores(await window.electronAPI.getCores()) }
+    catch (loadError) { setDeploymentError(cleanError(loadError)) }
+    finally { setDeploymentLoading(false) }
+  }
+
+  function updateDeploymentForm<Key extends keyof RemoteDeploymentInput>(key: Key, value: RemoteDeploymentInput[Key]) {
+    setDeploymentForm(current => ({ ...current, [key]: value }))
+    setDeploymentPreflight(null)
+    setDeploymentError('')
+  }
+
+  async function selectDeploymentCore(coreId: string) {
+    const core = deploymentCores.find(item => item.id === coreId)
+    setDeploymentForm(current => ({ ...current, coreId, coreName: core?.name || coreId, version: '' }))
+    setDeploymentVersions([])
+    setDeploymentPreflight(null)
+    setDeploymentError('')
+    if (!coreId) return
+    setDeploymentLoading(true)
+    try { setDeploymentVersions(await window.electronAPI.getVersions(coreId)) }
+    catch (loadError) { setDeploymentError(cleanError(loadError)) }
+    finally { setDeploymentLoading(false) }
+  }
+
+  async function runDeploymentPreflight() {
+    setDeploymentLoading(true)
+    setDeploymentError('')
+    try { setDeploymentPreflight(await window.electronAPI.remoteDeploymentPreflight(remoteServerId, deploymentForm)) }
+    catch (preflightError) { setDeploymentPreflight(null); setDeploymentError(cleanError(preflightError)) }
+    finally { setDeploymentLoading(false) }
+  }
+
+  async function startDeployment() {
+    if (!deploymentPreflight?.canDeploy) return
+    setDeploymentLoading(true)
+    setDeploymentError('')
+    try {
+      const job = await window.electronAPI.remoteDeploymentStart(remoteServerId, deploymentForm)
+      setDeploymentJobId(job.id)
+      setDeploymentJobs(current => [job, ...current.filter(item => item.id !== job.id)])
+    } catch (deploymentStartError) {
+      setDeploymentError(cleanError(deploymentStartError))
+    } finally {
+      setDeploymentLoading(false)
+    }
+  }
+
+  async function cancelDeployment(jobId: string) {
+    try {
+      const job = await window.electronAPI.remoteDeploymentCancel(remoteServerId, jobId)
+      setDeploymentJobs(current => [job, ...current.filter(item => item.id !== job.id)])
+    } catch (cancelError) {
+      setDeploymentError(cleanError(cancelError))
+    }
   }
 
   function openAddDialog() {
@@ -349,15 +486,116 @@ export function RemoteServerDetailPage({ active, remoteServerId }: Props) {
       </section>
 
       <section className="section-stack">
-        <div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">Minecraft 服务器</h2></div><Button startIcon={<Plus />} onClick={openAddDialog}>添加服务器目录</Button></div>
+        <div className="section-heading">
+          <div className="section-heading__copy"><h2 className="section-title">Minecraft 服务器</h2></div>
+          <div className="toolbar__group">
+            <Button variant="secondary" startIcon={<Plus />} onClick={openAddDialog}>添加已有目录</Button>
+            <Button startIcon={<Download />} onClick={() => void openDeploymentDialog()}>部署新服务器</Button>
+          </div>
+        </div>
+        {visibleDeploymentJobs.map(job => (
+          <div className="config-summary stack stack--compact" key={job.id}>
+            <div className="summary-line">
+              <strong>{job.input.name || job.input.coreName}</strong>
+              <div className="toolbar__group">
+                <Badge tone={deploymentTone(job.phase)}>{deploymentPhaseLabel(job.phase)}</Badge>
+                {deploymentActive(job.phase) ? <IconButton onClick={() => void cancelDeployment(job.id)} title="取消部署" aria-label="取消部署"><X /></IconButton> : null}
+              </div>
+            </div>
+            <ProgressBar value={job.progress} />
+            <div className="summary-line"><span>{job.message}</span><span>{job.progress}%</span></div>
+            {job.error ? <AlertBanner tone="danger">{job.error}</AlertBanner> : null}
+          </div>
+        ))}
         {instances.length ? <div className="toolbar"><div className="toolbar__group"><select className="ui-select server-picker" value={currentId} onChange={event => { setCurrentId(event.target.value); setTab(0) }}>{instances.map(instance => <option key={instance.id} value={instance.id}>{instance.name} ({instance.coreType} {instance.version})</option>)}</select><Badge tone={managedRunning || externalRunning ? 'success' : status === 'error' ? 'danger' : 'neutral'}>{statusLabel}</Badge></div>{current ? <div className="toolbar__group"><div className="range-control"><span className="range-control__value">内存 {maxRam} MB</span><input type="range" value={maxRam} onChange={event => setMaxRam(Number(event.target.value))} onMouseUp={event => { const value = Number(event.currentTarget.value); void window.electronAPI.remoteMinecraftServerUpdate(remoteServerId, current.id, value).then(updated => setInstances(items => items.map(item => item.id === updated.id ? updated : item))).catch(updateError => setError(cleanError(updateError))) }} min={512} max={16384} step={256} /></div>{processActive ? <Button variant="danger" size="sm" startIcon={<Square />} onClick={() => void handleStop()} loading={runtimeLoading}>停止</Button> : <Button size="sm" startIcon={<Play />} onClick={() => void handleStart()} loading={runtimeLoading}>启动</Button>}{processActive ? <IconButton tone="danger" onClick={() => void handleStop(true)} title="强制结束进程" aria-label="强制结束进程"><Power /></IconButton> : null}<IconButton tone="danger" onClick={() => setDeleteOpen(true)} disabled={processActive} title={processActive ? '请先停止服务器' : '移除服务器'} aria-label="移除服务器"><Trash2 /></IconButton></div> : null}</div> : null}
-        {current ? <div className="config-summary stack stack--compact"><p className="config-summary__path">{current.path}</p><div className="toolbar__group"><span className="inline-meta">{current.jarName}</span>{current.remark ? <span className="inline-meta">备注：{current.remark}</span> : null}</div></div> : null}
+        {current ? <div className="config-summary stack stack--compact"><p className="config-summary__path">{current.path}</p><div className="toolbar__group"><span className="inline-meta">{remoteLaunchLabel(current.launch)}</span>{current.remark ? <span className="inline-meta">备注：{current.remark}</span> : null}</div></div> : null}
         {!instances.length ? <div className="empty-state"><div className="empty-state__content"><FolderSearch className="empty-state__icon" /><h2 className="empty-state__title">还没有添加 Minecraft 服务器目录</h2><Button startIcon={<Plus />} onClick={openAddDialog}>自动查找或手动添加</Button></div></div> : null}
       </section>
 
       {current ? <section className="section-stack"><div className="ui-tabs" role="tablist">{['日志', '控制台', '配置'].map((label, index) => <button key={label} className={`ui-tab${tab === index ? ' ui-tab--active' : ''}`} onClick={() => setTab(index)} role="tab" aria-selected={tab === index}>{label}</button>)}</div>{tab === 0 ? <div className="terminal terminal--large" ref={terminalRef} onScroll={handleTerminalScroll}>{logs.map((line, index) => <div className="terminal__line" key={`${index}-${line}`}>{line}</div>)}</div> : null}{tab === 1 ? <div className="stack stack--compact"><div className="terminal" style={{ height: 330 }} ref={terminalRef} onScroll={handleTerminalScroll}>{logs.map((line, index) => <div className="terminal__line" key={`${index}-${line}`}>{line}</div>)}</div><div className="input-group"><input className="ui-input" placeholder="Minecraft 命令" value={cmd} onChange={event => setCmd(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void handleCommand() }} disabled={!processActive} /><IconButton tone="accent" onClick={() => void handleCommand()} disabled={!processActive} title="发送命令" aria-label="发送命令"><Send /></IconButton></div></div> : null}{tab === 2 ? <div className="section-stack"><div className="section-heading"><div className="section-heading__copy"><h2 className="section-title">服务器配置</h2><p className="section-heading__subtitle mono">{current.path}/server.properties</p></div>{Object.keys(propsMap).length ? <Button size="sm" onClick={() => void handleSaveProperties()}>保存配置</Button> : null}</div>{propsLoading ? <Spinner size={24} /> : null}{!propsLoading && !Object.keys(propsMap).length ? <AlertBanner tone="info">server.properties 文件未找到或为空</AlertBanner> : null}<div className="properties-grid">{Object.entries(propsMap).map(([key, value]) => PROP_MAP[key] ? <div className="property-field" key={key}><PropFieldWidget propKey={key} value={value} onChange={(propKey, propValue) => setPropsMap(previous => ({ ...previous, [propKey]: propValue }))} /></div> : null)}</div></div> : null}</section> : null}
 
       <OnlinePlayers hasServer={Boolean(current)} status={managedRunning || externalRunning ? 'running' : status === 'error' ? 'error' : 'stopped'} players={onlinePlayers} />
+
+      <Dialog
+        open={deploymentOpen}
+        onClose={() => setDeploymentOpen(false)}
+        title="部署 Minecraft 服务器"
+        width="lg"
+        footer={(
+          <div className="dialog-actions">
+            <Button variant="ghost" onClick={() => setDeploymentOpen(false)}>关闭</Button>
+            {deploymentJob && deploymentActive(deploymentJob.phase) ? (
+              <Button variant="danger" onClick={() => void cancelDeployment(deploymentJob.id)}>取消部署</Button>
+            ) : deploymentJob ? (
+              <Button variant="secondary" onClick={() => { setDeploymentJobId(''); setDeploymentError('') }}>返回配置</Button>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={() => void runDeploymentPreflight()} loading={deploymentLoading} disabled={!deploymentForm.name.trim() || !deploymentForm.targetPath.trim() || !deploymentForm.coreId || !deploymentForm.version || !deploymentForm.eulaAccepted}>检查环境</Button>
+                <Button startIcon={<Download />} onClick={() => void startDeployment()} loading={deploymentLoading} disabled={!deploymentPreflight?.canDeploy}>开始部署</Button>
+              </>
+            )}
+          </div>
+        )}
+      >
+        <div className="stack">
+          {deploymentError ? <AlertBanner tone="danger">{deploymentError}</AlertBanner> : null}
+          {deploymentJob ? (
+            <div className="stack">
+              <div className="summary-line"><strong>{deploymentJob.input.name}</strong><Badge tone={deploymentTone(deploymentJob.phase)}>{deploymentPhaseLabel(deploymentJob.phase)}</Badge></div>
+              <ProgressBar value={deploymentJob.progress} />
+              <div className="summary-line"><span>{deploymentJob.message}</span><span>{deploymentJob.progress}%</span></div>
+              <p className="config-summary__path">{deploymentJob.input.targetPath}</p>
+              {deploymentJob.error ? <AlertBanner tone="danger">{deploymentJob.error}</AlertBanner> : null}
+              {deploymentJob.phase === 'completed' ? <AlertBanner tone="success">服务器已经部署并加入远程管理列表。</AlertBanner> : null}
+            </div>
+          ) : (
+            <>
+              <div className="form-grid">
+                <Field label="服务器名称"><input className="ui-input" value={deploymentForm.name} onChange={event => updateDeploymentForm('name', event.target.value)} disabled={deploymentLoading} /></Field>
+                <Field label="服务器端口"><input className="ui-input" type="number" min={1} max={65535} value={deploymentForm.serverPort} onChange={event => updateDeploymentForm('serverPort', Number(event.target.value))} disabled={deploymentLoading} /></Field>
+              </div>
+              <Field label="部署目录"><input className="ui-input mono" value={deploymentForm.targetPath} onChange={event => updateDeploymentForm('targetPath', event.target.value)} disabled={deploymentLoading} /></Field>
+              <div className="form-grid">
+                <Field label="服务端核心">
+                  <select className="ui-select" value={deploymentForm.coreId} onChange={event => void selectDeploymentCore(event.target.value)} disabled={deploymentLoading}>
+                    <option value="">选择核心</option>
+                    {deploymentCores.map(core => <option key={core.id} value={core.id}>{core.name} · {core.categoryName || core.type}</option>)}
+                  </select>
+                </Field>
+                <Field label="Minecraft 版本">
+                  <select className="ui-select" value={deploymentForm.version} onChange={event => updateDeploymentForm('version', event.target.value)} disabled={deploymentLoading || !deploymentForm.coreId}>
+                    <option value="">选择版本</option>
+                    {deploymentVersions.map(version => <option key={version.id} value={version.id}>{version.id}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <div className="form-grid">
+                <Field label="最大内存 (MB)"><input className="ui-input" type="number" min={512} max={131072} step={256} value={deploymentForm.maxRam} onChange={event => updateDeploymentForm('maxRam', Number(event.target.value))} disabled={deploymentLoading} /></Field>
+                <Field label="备注"><input className="ui-input" value={deploymentForm.remark} onChange={event => updateDeploymentForm('remark', event.target.value)} disabled={deploymentLoading} /></Field>
+              </div>
+              <div className="stack stack--compact">
+                <Toggle checked={deploymentForm.startAfterDeploy === true} onChange={value => updateDeploymentForm('startAfterDeploy', value)} label="部署完成后立即启动" />
+                <div className="toolbar">
+                  <Toggle checked={deploymentForm.eulaAccepted} onChange={value => updateDeploymentForm('eulaAccepted', value)} label="我接受 Minecraft EULA" />
+                  <Button variant="ghost" size="sm" onClick={() => void window.electronAPI.openExternal('https://aka.ms/MinecraftEULA')}>查看 EULA</Button>
+                </div>
+              </div>
+              {deploymentPreflight ? (
+                <div className="stack stack--compact">
+                  <div className="info-grid">
+                    <InfoItem label="部署产物" value={`${deploymentPreflight.artifactName} · ${deploymentArtifactLabel(deploymentPreflight.artifactKind)}`} />
+                    <InfoItem label="远程架构" value={deploymentPreflight.architecture} />
+                    <InfoItem label="Java" value={deploymentPreflight.requiredJavaMajor === 0 ? '此核心不需要 Java' : deploymentPreflight.javaMajor ? `Java ${deploymentPreflight.javaMajor} / 要求 ${deploymentPreflight.requiredJavaMajor}` : `未找到 / 要求 ${deploymentPreflight.requiredJavaMajor}`} />
+                    <InfoItem label="可用空间" value={formatBytes(deploymentPreflight.availableBytes)} />
+                  </div>
+                  {deploymentPreflight.warnings.map(warning => <AlertBanner key={warning} tone="warning">{warning}</AlertBanner>)}
+                  {deploymentPreflight.canDeploy ? <AlertBanner tone="success">环境检查通过，可以开始部署。</AlertBanner> : null}
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </Dialog>
 
       <Dialog
         open={addOpen}

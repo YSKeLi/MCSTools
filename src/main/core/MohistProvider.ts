@@ -11,7 +11,7 @@ export class MohistProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'mohist', name: 'Mohist', type: 'hybrid',
     description: '混合核心，同时支持 Forge Mod 和 Bukkit 插件',
-    color: '#F44336', iconUrl: '/icons/mohist.png',
+    color: '#F44336', iconUrl: './icons/mohist.png',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {

@@ -5,6 +5,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { PersistentProcessController } from '../runtime/PersistentProcessController'
 import { downloadFile } from '../utils/download'
+import { extractFrpArchive } from './archive'
 
 export interface FrpConfig {
   serverAddr: string
@@ -158,10 +159,7 @@ export class FrpManager {
       this.emitLog('[FRP] 下载完成，正在解压...')
       this.tryRemovePath(extractDir, true)
       fs.mkdirSync(extractDir, { recursive: true })
-      const args = process.platform === 'win32'
-        ? ['-xf', archivePath, '-C', extractDir]
-        : ['-xzf', archivePath, '-C', extractDir]
-      execFileSync('tar', args, { windowsHide: true, stdio: 'ignore' })
+      await extractFrpArchive(archivePath, extractDir)
 
       const executableName = process.platform === 'win32' ? 'frpc.exe' : 'frpc'
       const extractedBinary = this.findExtractedBinary(extractDir, executableName)

@@ -1,4 +1,4 @@
-import type { RemoteServerOs } from './types'
+import type { RemoteMinecraftLaunchSpec, RemoteServerOs } from './types'
 
 export interface RemoteServerProfile {
   serverName?: string
@@ -76,4 +76,24 @@ export function validateRemoteJarName(value: unknown): string {
     throw new Error('远程服务端 JAR 文件名无效')
   }
   return jarName
+}
+
+export function validateRemoteLaunchSpec(value: unknown, fallbackJarName?: string): RemoteMinecraftLaunchSpec {
+  if (value === undefined && fallbackJarName) {
+    return { kind: 'jar', target: validateRemoteJarName(fallbackJarName) }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('远程服务端启动规格无效')
+  const candidate = value as Partial<RemoteMinecraftLaunchSpec>
+  const kind = candidate.kind
+  const target = typeof candidate.target === 'string' ? candidate.target.trim().replace(/\\/g, '/') : ''
+  if (kind !== 'jar' && kind !== 'java-args' && kind !== 'native') throw new Error('远程服务端启动类型无效')
+  if (!target || target.length > 1024 || target.startsWith('/') || /^[a-z]:/i.test(target) || /[\0\r\n]/.test(target)) {
+    throw new Error('远程服务端启动目标无效')
+  }
+  const segments = target.split('/')
+  if (segments.some(segment => !segment || segment === '.' || segment === '..')) throw new Error('远程服务端启动目标无效')
+  if (kind === 'jar' && !target.toLowerCase().endsWith('.jar')) throw new Error('JAR 启动目标必须是 .jar 文件')
+  if (kind === 'java-args' && !/(?:^|\/)(?:unix|win)_args\.txt$/i.test(target)) throw new Error('Java 参数文件无效')
+  if (kind === 'native' && !/(?:^|\/)bedrock_server(?:\.exe)?$/i.test(target)) throw new Error('原生服务端启动文件无效')
+  return { kind, target }
 }

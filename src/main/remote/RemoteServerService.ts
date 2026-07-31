@@ -1,20 +1,44 @@
-import { app, safeStorage } from 'electron'
+import { app, safeStorage, type BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
-import { Client, type FileEntryWithStats, type SFTPWrapper } from 'ssh2'
+import { Client, type ConnectConfig, type FileEntryWithStats, type SFTPWrapper } from 'ssh2'
+import { getCoreDownloadArtifact, type CoreDownloadArtifact } from '../core'
 import { detectServerFiles } from '../detect'
+import { downloadFile } from '../utils/download'
+import { readJsonStore, writeJsonStore } from '../utils/jsonStore'
 import {
   type MinecraftControlDescriptor,
   createManagedControlRecord,
   parseMinecraftControlDescriptor,
 } from '../server/minecraftControlProtocol'
-import { normalizeRemotePath, parseRemoteServerProfile, remoteBaseName, remoteJoin, remoteParentPath, validateRemoteJarName } from './remoteMinecraftPolicy'
+import { normalizeRemotePath, parseRemoteServerProfile, remoteBaseName, remoteJoin, remoteParentPath, validateRemoteJarName, validateRemoteLaunchSpec } from './remoteMinecraftPolicy'
+import {
+  classifyRemoteCoreArtifact,
+  deploymentRequiresJava,
+  normalizeRemoteDeploymentInput,
+  remoteArtifactCompatibilityWarning,
+  requiredDeploymentJavaMajor,
+  serializeRemoteDeploymentProfile,
+} from './deploymentPolicy'
+import {
+  prepareRemoteDeploymentArchive,
+  selectDeploymentLaunch,
+  sha256File,
+  type PreparedArchiveDeployment,
+} from './deploymentArtifacts'
 import { parsePosixMetrics } from './posixMetricsProtocol'
+import { normalizeRemoteAuthInput } from './remoteAuthPolicy'
 import type {
   RemoteDirectoryListing,
+  RemoteDeploymentArtifactKind,
+  RemoteDeploymentInput,
+  RemoteDeploymentJob,
+  RemoteDeploymentPhase,
+  RemoteDeploymentPreflight,
   RemoteFileBrowserItem,
   RemoteMinecraftDirectory,
+  RemoteMinecraftLaunchSpec,
   RemoteMinecraftServer,
   RemoteMinecraftServerInput,
   RemoteMinecraftServerStatus,
@@ -36,9 +60,13 @@ const COMMAND_TIMEOUT_MS = 20000
 const MAX_OUTPUT_BYTES = 1024 * 1024
 
 interface StoredRemoteServer extends RemoteServerSummary {
-  encryptedPassword: string
+  encryptedPassword?: string
+  encryptedPrivateKey?: string
+  encryptedPassphrase?: string
   minecraftServers: RemoteMinecraftServer[]
 }
+
+export type RemoteSshAuth = Pick<ConnectConfig, 'password' | 'privateKey' | 'passphrase' | 'tryKeyboard'>
 
 interface CommandResult {
   stdout: string
@@ -51,13 +79,21 @@ const REMOTE_PID_FILE = 'server.pid'
 const REMOTE_INPUT_FILE = 'server.stdin'
 const REMOTE_CONTROL_FILE = 'control.json'
 const SERVER_PROFILE_FILE = 'profilemcsrv.toml'
+const REMOTE_DEPLOYMENT_MARKER_FILE = '.mcstools-managed.json'
 const MAX_REMOTE_FILE_BYTES = 2 * 1024 * 1024
 const MAX_REMOTE_PROFILE_BYTES = 64 * 1024
 const SFTP_OPERATION_TIMEOUT_MS = 20000
+const SFTP_UPLOAD_INACTIVITY_TIMEOUT_MS = 45000
+const TERMINAL_DEPLOYMENT_PHASES = new Set<RemoteDeploymentPhase>(['completed', 'failed', 'cancelled'])
+const REMOTE_DEPLOYMENT_PHASES = new Set<RemoteDeploymentPhase>([
+  'queued', 'preflight', 'downloading', 'uploading', 'verifying', 'installing',
+  'configuring', 'registering', 'starting', 'completed', 'failed', 'cancelled',
+])
 
 const WINDOWS_RUNNER_SCRIPT = String.raw`param(
   [Parameter(Mandatory=$true)][string]$WorkingDirectory,
-  [Parameter(Mandatory=$true)][string]$JarName,
+  [Parameter(Mandatory=$true)][ValidateSet('jar','java-args','native')][string]$LaunchKind,
+  [Parameter(Mandatory=$true)][string]$LaunchTarget,
   [Parameter(Mandatory=$true)][int]$MaxRam,
   [Parameter(Mandatory=$true)][string]$PipeName,
   [Parameter(Mandatory=$true)][string]$LogPath,
@@ -68,12 +104,31 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 function Write-Log([string]$Line) {
   [System.IO.File]::AppendAllText($LogPath, $Line + [Environment]::NewLine, $utf8)
 }
+function Resolve-JavaExecutable {
+  if ($env:JAVA_HOME) {
+    $javaHomeCandidate = Join-Path $env:JAVA_HOME 'bin\java.exe'
+    if (Test-Path -LiteralPath $javaHomeCandidate -PathType Leaf) {
+      return [System.IO.Path]::GetFullPath($javaHomeCandidate)
+    }
+  }
+  $javaCommand = Get-Command java.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($javaCommand) { return $javaCommand.Source }
+  throw '未找到 Java。请将 java.exe 加入 PATH，或在远程主机上正确设置 JAVA_HOME。'
+}
 try {
   $psi = [System.Diagnostics.ProcessStartInfo]::new()
-  $psi.FileName = 'java.exe'
   $psi.WorkingDirectory = $WorkingDirectory
-  $escapedJar = $JarName.Replace('"', '\"')
-  $psi.Arguments = ('-Xmx{0}M -jar "{1}" nogui' -f $MaxRam, $escapedJar)
+  $escapedTarget = $LaunchTarget.Replace('"', '\"')
+  if ($LaunchKind -eq 'jar') {
+    $psi.FileName = Resolve-JavaExecutable
+    $psi.Arguments = ('-Xmx{0}M -jar "{1}" nogui' -f $MaxRam, $escapedTarget)
+  } elseif ($LaunchKind -eq 'java-args') {
+    $psi.FileName = Resolve-JavaExecutable
+    $psi.Arguments = ('-Xmx{0}M "@{1}" nogui' -f $MaxRam, $escapedTarget)
+  } else {
+    $psi.FileName = Join-Path $WorkingDirectory $LaunchTarget
+    $psi.Arguments = ''
+  }
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
   $psi.RedirectStandardInput = $true
@@ -231,17 +286,28 @@ function storePath(): string {
   return path.join(app.getPath('userData'), 'remote-servers.json')
 }
 
+function deploymentStorePath(): string {
+  return path.join(app.getPath('userData'), 'remote-deployments.json')
+}
+
 function normalizeMinecraftServer(item: any): RemoteMinecraftServer | null {
   if (!item || typeof item !== 'object' || typeof item.id !== 'string') return null
   const remotePath = typeof item.path === 'string' ? item.path.trim() : ''
   const jarName = typeof item.jarName === 'string' ? item.jarName.trim() : ''
   if (!remotePath || !jarName) return null
+  let launch: RemoteMinecraftLaunchSpec
+  try {
+    launch = validateRemoteLaunchSpec(item.launch, jarName)
+  } catch {
+    return null
+  }
   const maxRam = Number(item.maxRam)
   return {
     id: item.id,
     name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : remoteBaseName(remotePath),
     path: remotePath,
     jarName,
+    launch,
     coreType: typeof item.coreType === 'string' && item.coreType.trim() ? item.coreType.trim() : '未知',
     version: typeof item.version === 'string' && item.version.trim() ? item.version.trim() : '未知',
     remark: typeof item.remark === 'string' ? item.remark.trim() : '',
@@ -252,8 +318,12 @@ function normalizeMinecraftServer(item: any): RemoteMinecraftServer | null {
 
 function normalizeStoredServer(item: any): StoredRemoteServer | null {
   if (!item || typeof item !== 'object') return null
-  if (typeof item.id !== 'string' || typeof item.encryptedPassword !== 'string') return null
+  if (typeof item.id !== 'string') return null
   if (item.os !== 'linux' && item.os !== 'windows' && item.os !== 'macos') return null
+  const hasPassword = typeof item.encryptedPassword === 'string' && item.encryptedPassword.length > 0
+  const hasPrivateKey = typeof item.encryptedPrivateKey === 'string' && item.encryptedPrivateKey.length > 0
+  if (!hasPassword && !hasPrivateKey) return null
+  const authType = item.authType === 'private-key' && hasPrivateKey ? 'private-key' : (hasPassword ? 'password' : 'private-key')
   const isLegacyWinRm = item.transport === 'winrm'
   return {
     id: item.id,
@@ -262,9 +332,14 @@ function normalizeStoredServer(item: any): StoredRemoteServer | null {
     port: isLegacyWinRm ? 22 : (Number.isInteger(Number(item.port)) ? Number(item.port) : 22),
     username: typeof item.username === 'string' ? item.username : '',
     os: item.os,
+    authType,
     hostFingerprint: isLegacyWinRm ? '' : (typeof item.hostFingerprint === 'string' ? item.hostFingerprint : ''),
     createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
-    encryptedPassword: item.encryptedPassword,
+    ...(hasPassword ? { encryptedPassword: item.encryptedPassword } : {}),
+    ...(hasPrivateKey ? { encryptedPrivateKey: item.encryptedPrivateKey } : {}),
+    ...(typeof item.encryptedPassphrase === 'string' && item.encryptedPassphrase
+      ? { encryptedPassphrase: item.encryptedPassphrase }
+      : {}),
     minecraftServers: Array.isArray(item.minecraftServers)
       ? item.minecraftServers.map(normalizeMinecraftServer).filter((server: RemoteMinecraftServer | null): server is RemoteMinecraftServer => server !== null)
       : [],
@@ -310,14 +385,20 @@ function writeStoredServers(servers: StoredRemoteServer[]): void {
 }
 
 function summary(server: StoredRemoteServer): RemoteServerSummary {
-  const { encryptedPassword: _encryptedPassword, minecraftServers: _minecraftServers, ...safeServer } = server
+  const {
+    encryptedPassword: _encryptedPassword,
+    encryptedPrivateKey: _encryptedPrivateKey,
+    encryptedPassphrase: _encryptedPassphrase,
+    minecraftServers: _minecraftServers,
+    ...safeServer
+  } = server
   return safeServer
 }
 
 function assertSafeStorage(): void {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('当前系统不支持安全凭据存储，无法保存服务器密码')
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('当前系统不支持安全凭据存储，无法保存服务器登录凭据')
   if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
-    throw new Error('当前 Linux 系统未配置安全密钥环，无法保存服务器密码')
+    throw new Error('当前 Linux 系统未配置安全密钥环，无法保存服务器登录凭据')
   }
 }
 
@@ -327,7 +408,7 @@ function validateInput(input: RemoteServerInput): RemoteServerInput {
     host: typeof input?.host === 'string' ? input.host.trim() : '',
     port: Number(input?.port),
     username: typeof input?.username === 'string' ? input.username.trim() : '',
-    password: typeof input?.password === 'string' ? input.password : '',
+    ...normalizeRemoteAuthInput(input),
     os: input?.os,
     expectedFingerprint: typeof input?.expectedFingerprint === 'string' ? input.expectedFingerprint : '',
   }
@@ -335,7 +416,6 @@ function validateInput(input: RemoteServerInput): RemoteServerInput {
   if (!value.host || value.host.length > 255 || /\s/.test(value.host)) throw new Error('请输入有效的服务器地址')
   if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw new Error('SSH 端口无效')
   if (!value.username || value.username.length > 128 || /[\r\n]/.test(value.username)) throw new Error('请输入有效的登录账户')
-  if (!value.password || value.password.length > 4096 || /[\r\n]/.test(value.password)) throw new Error('请输入有效的登录密码')
   if (value.os !== 'linux' && value.os !== 'windows' && value.os !== 'macos') throw new Error('请选择服务器系统')
   if (!value.expectedFingerprint || !/^[a-f0-9]{64}$/i.test(value.expectedFingerprint)) {
     throw new Error('请先确认 SSH 主机指纹')
@@ -355,13 +435,42 @@ function validateFingerprintInput(input: RemoteServerFingerprintInput): RemoteSe
   return value
 }
 
-function decryptPassword(server: StoredRemoteServer): string {
+function decryptSecret(value: string | undefined, errorMessage: string): string {
   assertSafeStorage()
+  if (!value) throw new Error(errorMessage)
   try {
-    return safeStorage.decryptString(Buffer.from(server.encryptedPassword, 'base64'))
+    return safeStorage.decryptString(Buffer.from(value, 'base64'))
   } catch {
-    throw new Error('服务器密码无法解密，请删除后重新添加该服务器')
+    throw new Error(errorMessage)
   }
+}
+
+function storedSshAuth(server: StoredRemoteServer): RemoteSshAuth {
+  if (server.authType === 'private-key') {
+    const passphrase = server.encryptedPassphrase
+      ? decryptSecret(server.encryptedPassphrase, '私钥口令无法解密，请删除后重新添加该服务器')
+      : undefined
+    return {
+      privateKey: decryptSecret(server.encryptedPrivateKey, '服务器私钥无法解密，请删除后重新添加该服务器'),
+      ...(passphrase ? { passphrase } : {}),
+      tryKeyboard: false,
+    }
+  }
+  return {
+    password: decryptSecret(server.encryptedPassword, '服务器密码无法解密，请删除后重新添加该服务器'),
+    tryKeyboard: true,
+  }
+}
+
+function inputSshAuth(input: RemoteServerInput): RemoteSshAuth {
+  if (input.authType === 'private-key') {
+    return {
+      privateKey: input.privateKey,
+      ...(input.passphrase ? { passphrase: input.passphrase } : {}),
+      tryKeyboard: false,
+    }
+  }
+  return { password: input.password, tryKeyboard: true }
 }
 
 function friendlyConnectionError(
@@ -388,9 +497,9 @@ function friendlyConnectionError(
   return new Error(message || 'SSH 连接失败')
 }
 
-function executeRemote(
+export function executeRemote(
   target: Pick<RemoteServerSummary, 'host' | 'port' | 'username' | 'os'>,
-  password: string,
+  auth: RemoteSshAuth,
   expectedFingerprint: string | undefined,
   command: string,
   input: string,
@@ -415,7 +524,7 @@ function executeRemote(
 
     client
       .on('keyboard-interactive', (_name, _instructions, _language, prompts, complete) => {
-        complete(prompts.map(() => password))
+        complete(prompts.map(() => auth.password || ''))
       })
       .on('ready', () => {
         authenticated = true
@@ -455,8 +564,7 @@ function executeRemote(
         host: target.host,
         port: target.port,
         username: target.username,
-        password,
-        tryKeyboard: true,
+        ...auth,
         readyTimeout: CONNECTION_TIMEOUT_MS,
         keepaliveInterval: 5000,
         keepaliveCountMax: 2,
@@ -579,7 +687,7 @@ function findMinecraftServer(remoteServerId: string, minecraftServerId: string):
 function connectSftp(server: StoredRemoteServer): Promise<{ client: Client; sftp: SFTPWrapper }> {
   return new Promise((resolve, reject) => {
     const client = new Client()
-    const password = decryptPassword(server)
+    const auth = storedSshAuth(server)
     let fingerprintMismatch = false
     let authenticated = false
     let settled = false
@@ -591,7 +699,7 @@ function connectSftp(server: StoredRemoteServer): Promise<{ client: Client; sftp
     }
     client
       .on('keyboard-interactive', (_name, _instructions, _language, prompts, complete) => {
-        complete(prompts.map(() => password))
+        complete(prompts.map(() => auth.password || ''))
       })
       .on('ready', () => {
         authenticated = true
@@ -606,8 +714,7 @@ function connectSftp(server: StoredRemoteServer): Promise<{ client: Client; sftp
         host: server.host,
         port: server.port,
         username: server.username,
-        password,
-        tryKeyboard: true,
+        ...auth,
         readyTimeout: CONNECTION_TIMEOUT_MS,
         keepaliveInterval: 5000,
         keepaliveCountMax: 2,
@@ -666,26 +773,255 @@ function sftpReadText(sftp: SFTPWrapper, remotePath: string, maxBytes = MAX_REMO
 
 function sftpWriteText(sftp: SFTPWrapper, remotePath: string, content: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    sftp.writeFile(remotePath, Buffer.from(content, 'utf8'), error => error ? reject(error) : resolve())
+    let settled = false
+    const timer = setTimeout(() => {
+      settled = true
+      reject(new Error('写入远程文件超时'))
+    }, SFTP_OPERATION_TIMEOUT_MS)
+    sftp.writeFile(remotePath, Buffer.from(content, 'utf8'), error => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    })
   })
 }
 
 function sftpAppendText(sftp: SFTPWrapper, remotePath: string, content: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    sftp.appendFile(remotePath, Buffer.from(content, 'utf8'), error => error ? reject(error) : resolve())
+    let settled = false
+    const timer = setTimeout(() => {
+      settled = true
+      reject(new Error('追加远程文件超时'))
+    }, SFTP_OPERATION_TIMEOUT_MS)
+    sftp.appendFile(remotePath, Buffer.from(content, 'utf8'), error => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    })
   })
 }
 
 function sftpMkdir(sftp: SFTPWrapper, remotePath: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error?: unknown) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => finish(new Error('创建远程目录超时')), SFTP_OPERATION_TIMEOUT_MS)
     sftp.mkdir(remotePath, error => {
-      if (!error) return resolve()
+      if (settled) return
+      if (!error) return finish()
       sftp.stat(remotePath, (statError, stats) => {
-        if (!statError && stats.isDirectory()) resolve()
-        else reject(error)
+        if (settled) return
+        if (!statError && stats.isDirectory()) finish()
+        else finish(error)
       })
     })
   })
+}
+
+function sftpUploadFile(
+  sftp: SFTPWrapper,
+  localPath: string,
+  remotePath: string,
+  onProgress: (transferred: number, total: number) => void,
+): Promise<void> {
+  const total = fs.statSync(localPath).size
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer: NodeJS.Timeout
+    const finish = (error?: unknown) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const armTimeout = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => finish(new Error('上传远程文件超时')), SFTP_UPLOAD_INACTIVITY_TIMEOUT_MS)
+    }
+    armTimeout()
+    sftp.fastPut(localPath, remotePath, {
+      step: (transferred) => {
+        if (settled) return
+        armTimeout()
+        onProgress(transferred, total)
+      },
+    }, error => error ? finish(error) : finish())
+  })
+}
+
+function sftpStatFile(sftp: SFTPWrapper, remotePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      settled = true
+      reject(new Error('检查远程文件超时'))
+    }, SFTP_OPERATION_TIMEOUT_MS)
+    sftp.stat(remotePath, (error, stats) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) return reject(error)
+      if (!stats.isFile()) return reject(new Error('远程启动目标不是文件'))
+      resolve()
+    })
+  })
+}
+
+async function uploadPreparedArchive(
+  server: StoredRemoteServer,
+  stagingPath: string,
+  payload: PreparedArchiveDeployment,
+  onProgress: (transferred: number, total: number) => void,
+  assertNotCancelled: () => void,
+): Promise<void> {
+  const total = payload.files.reduce((sum, file) => sum + file.size, 0)
+  let completed = 0
+  await withSftp(server, async sftp => {
+    for (const relativePath of payload.directories) {
+      assertNotCancelled()
+      await sftpMkdir(sftp, remoteJoin(stagingPath, relativePath))
+    }
+    for (const file of payload.files) {
+      assertNotCancelled()
+      await sftpUploadFile(sftp, file.localPath, remoteJoin(stagingPath, file.relativePath), transferred => {
+        onProgress(completed + transferred, total)
+      })
+      completed += file.size
+      onProgress(completed, total)
+    }
+  })
+}
+
+async function verifyRemoteDeploymentPayload(
+  server: StoredRemoteServer,
+  stagingPath: string,
+  payload: PreparedArchiveDeployment,
+  localDirectory: string,
+): Promise<void> {
+  const rows: string[] = []
+  for (const file of payload.files) rows.push(`${await sha256File(file.localPath)}\t${file.relativePath}`)
+  const localManifestPath = path.join(localDirectory, 'upload-manifest.tsv')
+  const remoteManifestPath = remoteJoin(stagingPath, '.mcstools-upload-manifest.tsv')
+  fs.writeFileSync(localManifestPath, `${rows.join('\n')}\n`, 'utf8')
+  await withSftp(server, sftp => sftpUploadFile(sftp, localManifestPath, remoteManifestPath, () => undefined))
+
+  if (server.os === 'windows') {
+    const script = `$root=${powerShellQuote(stagingPath)}
+$manifest=${powerShellQuote(remoteManifestPath)}
+foreach ($line in Get-Content -LiteralPath $manifest -Encoding UTF8) {
+  if (-not $line) { continue }
+  $parts=$line -split "\`t",2
+  if ($parts.Count -ne 2) { throw '部署校验清单格式无效' }
+  $file=Join-Path $root ($parts[1].Replace('/','\\'))
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw ('远程文件缺失: ' + $parts[1]) }
+  $actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+  if ($actual -ne $parts[0]) { throw ('远程文件校验失败: ' + $parts[1]) }
+}
+Remove-Item -LiteralPath $manifest -Force`
+    await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 10 * 60 * 1000)
+    return
+  }
+
+  const script = `set -eu
+root=${posixQuote(stagingPath)}
+manifest=${posixQuote(remoteManifestPath)}
+tab=$(printf '\\t')
+while IFS="$tab" read -r expected relative; do
+  [ -n "$expected" ] || continue
+  file="$root/$relative"
+  [ -f "$file" ] || { printf '远程文件缺失: %s\\n' "$relative" >&2; exit 1; }
+  if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum -- "$file" | awk '{print $1}'); else actual=$(shasum -a 256 -- "$file" | awk '{print $1}'); fi
+  [ "$actual" = "$expected" ] || { printf '远程文件校验失败: %s\\n' "$relative" >&2; exit 1; }
+done < "$manifest"
+rm -f -- "$manifest"`
+  await runStoredCommand(server, 'sh -s', script, 10 * 60 * 1000)
+}
+
+async function discoverRemoteDeploymentLaunch(
+  server: StoredRemoteServer,
+  stagingPath: string,
+  coreId: string,
+): Promise<RemoteMinecraftLaunchSpec> {
+  let output: string
+  if (server.os === 'windows') {
+    const script = `$root=[System.IO.Path]::GetFullPath(${powerShellQuote(stagingPath)}).TrimEnd('\\')
+$paths=[System.Collections.Generic.List[string]]::new()
+Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'win_args.txt' | ForEach-Object { $paths.Add($_.FullName.Substring($root.Length).TrimStart('\\').Replace('\\','/')) }
+Get-ChildItem -LiteralPath $root -File -Filter '*.jar' | ForEach-Object { $paths.Add($_.Name) }
+$paths | Select-Object -Unique | ForEach-Object { [Console]::Out.WriteLine($_) }`
+    output = await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 60000)
+  } else {
+    const argsName = 'unix_args.txt'
+    const script = `set -eu
+cd ${posixQuote(stagingPath)}
+find . -type f -name ${posixQuote(argsName)} -print
+find . -maxdepth 2 -type f -name '*.jar' -print`
+    output = await runStoredCommand(server, 'sh -s', script, 60000)
+  }
+  const relativePaths = [...new Set(output.split(/\r?\n/)
+    .map(value => value.trim().replace(/^\.\//, '').replace(/\\/g, '/'))
+    .filter(Boolean))]
+  return validateRemoteLaunchSpec(selectDeploymentLaunch(relativePaths, server.os, coreId))
+}
+
+async function runRemoteCoreInstaller(
+  server: StoredRemoteServer,
+  stagingPath: string,
+  installerName: string,
+  coreId: string,
+  version: string,
+): Promise<RemoteMinecraftLaunchSpec> {
+  const installerPath = remoteJoin(stagingPath, installerName)
+  const isQuilt = coreId.trim().toLowerCase() === 'quilt'
+  if (server.os === 'windows') {
+    const installerArguments = isQuilt
+      ? `@('-jar',${powerShellQuote(installerPath)},'install','server',${powerShellQuote(version)},'--install-dir=.','--download-server','--create-scripts')`
+      : `@('-jar',${powerShellQuote(installerPath)},'--installServer')`
+    const script = `$javaPath=$null
+if ($env:JAVA_HOME) { $candidate=Join-Path $env:JAVA_HOME 'bin\\java.exe'; if (Test-Path -LiteralPath $candidate -PathType Leaf) { $javaPath=$candidate } }
+if (-not $javaPath) { $javaCommand=Get-Command java.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($javaCommand) { $javaPath=$javaCommand.Source } }
+if (-not $javaPath) { throw '未找到 Java' }
+Set-Location -LiteralPath ${powerShellQuote(stagingPath)}
+$arguments=${installerArguments}
+& $javaPath @arguments
+if ($LASTEXITCODE -ne 0) { throw ('核心安装器退出，代码 ' + $LASTEXITCODE) }`
+    await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 15 * 60 * 1000)
+  } else {
+    const installCommand = isQuilt
+      ? `java -jar ${posixQuote(installerName)} install server ${posixQuote(version)} --install-dir=. --download-server --create-scripts`
+      : `java -jar ${posixQuote(installerName)} --installServer`
+    const script = `set -eu
+cd ${posixQuote(stagingPath)}
+${installCommand}`
+    await runStoredCommand(server, 'sh -s', script, 15 * 60 * 1000)
+  }
+  const launch = await discoverRemoteDeploymentLaunch(server, stagingPath, coreId)
+  if (server.os === 'windows') {
+    await runStoredCommand(server, encodeWindowsPowerShellCommand(`Remove-Item -LiteralPath ${powerShellQuote(installerPath)} -Force -ErrorAction SilentlyContinue`))
+  } else {
+    await runStoredCommand(server, 'sh -s', `rm -f -- ${posixQuote(installerPath)}`)
+  }
+  return launch
+}
+
+async function makeRemoteLaunchExecutable(
+  server: StoredRemoteServer,
+  stagingPath: string,
+  launch: RemoteMinecraftLaunchSpec,
+): Promise<void> {
+  if (launch.kind !== 'native' || server.os === 'windows') return
+  await runStoredCommand(server, 'sh -s', `chmod u+x -- ${posixQuote(remoteJoin(stagingPath, launch.target))}`)
 }
 
 async function inspectMinecraftDirectory(
@@ -749,6 +1085,17 @@ function runtimePaths(minecraftServer: RemoteMinecraftServer) {
   }
 }
 
+function posixMinecraftLaunchCommand(minecraftServer: RemoteMinecraftServer): string {
+  const maxRam = posixQuote(`-Xmx${minecraftServer.maxRam}M`)
+  if (minecraftServer.launch.kind === 'jar') {
+    return `java ${maxRam} -jar ${posixQuote(minecraftServer.launch.target)} nogui`
+  }
+  if (minecraftServer.launch.kind === 'java-args') {
+    return `java ${maxRam} ${posixQuote(`@${minecraftServer.launch.target}`)} nogui`
+  }
+  return posixQuote(`./${minecraftServer.launch.target}`)
+}
+
 const remoteControlCache = new Map<string, { expiresAt: number; value: MinecraftControlDescriptor | null }>()
 
 function remoteControlCacheKey(server: StoredRemoteServer, minecraftServer: RemoteMinecraftServer): string {
@@ -782,13 +1129,206 @@ async function runStoredCommand(
 ): Promise<string> {
   const result = await executeRemote(
     server,
-    decryptPassword(server),
+    storedSshAuth(server),
     server.hostFingerprint || undefined,
     command,
     input,
     timeoutMs,
   )
   return result.stdout
+}
+
+function deploymentJavaMajor(versionLine: string): number | null {
+  const match = versionLine.match(/version\s+"(?:1\.)?(\d+)/i)
+    || versionLine.match(/(?:^|\s)(?:1\.)?(\d+)(?:[._+-]|$)/)
+  if (!match) return null
+  const parsed = Number(match[1])
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function normalizedRemoteArchitecture(value: string): string {
+  const normalized = value.trim().toLowerCase()
+  if (['x86_64', 'amd64', 'x64'].includes(normalized)) return 'x64'
+  if (['aarch64', 'arm64'].includes(normalized)) return 'arm64'
+  return normalized || 'unknown'
+}
+
+function parseDeploymentProbe(output: string): {
+  architecture: string
+  availableBytes: number
+  targetExists: boolean
+  parentWritable: boolean
+  portInUse: boolean
+  javaMajor: number | null
+} {
+  const values = new Map<string, string>()
+  for (const line of output.replace(/\0/g, '').split(/\r?\n/)) {
+    const separator = line.indexOf('=')
+    if (separator > 0) values.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim())
+  }
+  const booleanValue = (key: string) => values.get(key)?.toLowerCase() === 'true'
+  const availableBytes = Number(values.get('available_bytes'))
+  return {
+    architecture: normalizedRemoteArchitecture(values.get('architecture') || ''),
+    availableBytes: Number.isSafeInteger(availableBytes) && availableBytes >= 0 ? availableBytes : 0,
+    targetExists: booleanValue('target_exists'),
+    parentWritable: booleanValue('parent_writable'),
+    portInUse: booleanValue('port_in_use'),
+    javaMajor: deploymentJavaMajor(values.get('java_version') || ''),
+  }
+}
+
+async function probeRemoteDeployment(
+  server: StoredRemoteServer,
+  input: RemoteDeploymentInput,
+  artifact: CoreDownloadArtifact,
+): Promise<RemoteDeploymentPreflight> {
+  let output: string
+  if (server.os === 'windows') {
+    const script = String.raw`$target=${powerShellQuote(input.targetPath)}
+$port=${input.serverPort}
+$parent=[System.IO.Path]::GetDirectoryName($target)
+$probe=$parent
+while ($probe -and -not (Test-Path -LiteralPath $probe)) { $next=[System.IO.Path]::GetDirectoryName($probe); if ($next -eq $probe) { break }; $probe=$next }
+$targetExists=Test-Path -LiteralPath $target
+$parentWritable=$false
+if ($probe -and (Test-Path -LiteralPath $probe -PathType Container)) {
+  $probeFile=Join-Path $probe ('.mcstools-write-test-' + [guid]::NewGuid().ToString('N'))
+  try { [System.IO.File]::WriteAllText($probeFile,'ok'); Remove-Item -LiteralPath $probeFile -Force; $parentWritable=$true } catch { Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue }
+}
+$available=0
+try { $root=[System.IO.Path]::GetPathRoot($probe); $available=[System.IO.DriveInfo]::new($root).AvailableFreeSpace } catch {}
+$javaPath=$null
+if ($env:JAVA_HOME) { $candidate=Join-Path $env:JAVA_HOME 'bin\java.exe'; if (Test-Path -LiteralPath $candidate -PathType Leaf) { $javaPath=$candidate } }
+if (-not $javaPath) { $javaCommand=Get-Command java.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($javaCommand) { $javaPath=$javaCommand.Source } }
+$javaVersion=''
+if ($javaPath) { $javaVersion=((& $javaPath -version 2>&1 | Select-Object -First 1) -join '').Replace([char]13,'').Replace([char]10,'') }
+$portInUse=$null -ne (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1)
+[Console]::Out.WriteLine('architecture=' + $env:PROCESSOR_ARCHITECTURE)
+[Console]::Out.WriteLine('available_bytes=' + $available)
+[Console]::Out.WriteLine('target_exists=' + $targetExists.ToString().ToLowerInvariant())
+[Console]::Out.WriteLine('parent_writable=' + $parentWritable.ToString().ToLowerInvariant())
+[Console]::Out.WriteLine('port_in_use=' + $portInUse.ToString().ToLowerInvariant())
+[Console]::Out.WriteLine('java_version=' + $javaVersion)`
+    output = await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 30000)
+  } else {
+    const script = String.raw`set -u
+target=${posixQuote(input.targetPath)}
+port=${input.serverPort}
+parent=$(dirname -- "$target")
+probe=$parent
+while [ ! -e "$probe" ] && [ "$probe" != "/" ]; do probe=$(dirname -- "$probe"); done
+target_exists=false
+[ -e "$target" ] && target_exists=true
+parent_writable=false
+[ -d "$probe" ] && [ -w "$probe" ] && parent_writable=true
+available_bytes=$(df -Pk "$probe" 2>/dev/null | awk 'NR==2 { printf "%.0f", $4 * 1024 }')
+[ -n "$available_bytes" ] || available_bytes=0
+java_version=''
+if command -v java >/dev/null 2>&1; then java_version=$(java -version 2>&1 | sed -n '1p' | tr -d '\r\n'); fi
+port_in_use=false
+if command -v ss >/dev/null 2>&1; then
+  if ss -ltn 2>/dev/null | awk -v suffix=":$port" 'NR > 1 { address=$4; if (length(address) >= length(suffix) && substr(address, length(address) - length(suffix) + 1) == suffix) found=1 } END { exit(found ? 0 : 1) }'; then port_in_use=true; fi
+elif command -v lsof >/dev/null 2>&1; then
+  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then port_in_use=true; fi
+fi
+printf 'architecture=%s\n' "$(uname -m 2>/dev/null || printf unknown)"
+printf 'available_bytes=%s\n' "$available_bytes"
+printf 'target_exists=%s\n' "$target_exists"
+printf 'parent_writable=%s\n' "$parent_writable"
+printf 'port_in_use=%s\n' "$port_in_use"
+printf 'java_version=%s\n' "$java_version"`
+    output = await runStoredCommand(server, 'sh -s', script, 30000)
+  }
+
+  const probe = parseDeploymentProbe(output)
+  const artifactKind = classifyRemoteCoreArtifact(artifact.coreId, artifact.fileName, artifact.url)
+  const requiresJava = deploymentRequiresJava(input.coreId)
+  const requiredJava = requiresJava ? requiredDeploymentJavaMajor(input.version) : 0
+  const warnings: string[] = []
+  if (probe.targetExists) warnings.push('目标目录已经存在')
+  if (!probe.parentWritable) warnings.push('登录账户无法写入目标目录的上级位置')
+  if (probe.availableBytes < 256 * 1024 * 1024) warnings.push('目标磁盘可用空间不足 256 MB')
+  if (probe.portInUse) warnings.push(`端口 ${input.serverPort} 已被占用`)
+  if (requiresJava && probe.javaMajor === null) warnings.push(`未找到 Java ${requiredJava} 或更高版本`)
+  else if (requiresJava && probe.javaMajor !== null && probe.javaMajor < requiredJava) warnings.push(`当前 Java ${probe.javaMajor} 低于所需的 Java ${requiredJava}`)
+  const compatibilityWarning = remoteArtifactCompatibilityWarning(server.os, input.coreId, input.version)
+  if (compatibilityWarning) warnings.push(compatibilityWarning)
+  if (artifactKind === 'unsupported') warnings.push('该核心返回了不支持的部署文件格式')
+
+  return {
+    targetPath: input.targetPath,
+    artifactName: artifact.fileName,
+    artifactKind,
+    requiredJavaMajor: requiredJava,
+    javaMajor: probe.javaMajor,
+    architecture: probe.architecture,
+    availableBytes: probe.availableBytes,
+    targetExists: probe.targetExists,
+    parentWritable: probe.parentWritable,
+    portAvailable: !probe.portInUse,
+    canDeploy: warnings.length === 0,
+    warnings,
+  }
+}
+
+function deploymentStagingPath(targetPath: string, jobId: string): string {
+  return `${targetPath}.mcstools-deploy-${jobId.replace(/[^a-z0-9]/gi, '')}`
+}
+
+async function createRemoteDeploymentStaging(
+  server: StoredRemoteServer,
+  targetPath: string,
+  stagingPath: string,
+): Promise<void> {
+  const parentPath = remoteParentPath(server.os, targetPath)
+  if (!parentPath) throw new Error('部署目录缺少有效的上级目录')
+  if (server.os === 'windows') {
+    const script = `$target=${powerShellQuote(targetPath)}; $staging=${powerShellQuote(stagingPath)}; $parent=${powerShellQuote(parentPath)}; if (Test-Path -LiteralPath $target) { throw '目标目录已经存在' }; New-Item -ItemType Directory -Path $parent -Force | Out-Null; if (Test-Path -LiteralPath $staging) { throw '部署临时目录已经存在' }; New-Item -ItemType Directory -Path $staging | Out-Null`
+    await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 30000)
+    return
+  }
+  const script = `set -eu\ntarget=${posixQuote(targetPath)}\nstaging=${posixQuote(stagingPath)}\nparent=${posixQuote(parentPath)}\n[ ! -e "$target" ] || { printf '目标目录已经存在' >&2; exit 1; }\nmkdir -p -- "$parent"\n[ ! -e "$staging" ] || { printf '部署临时目录已经存在' >&2; exit 1; }\nmkdir -- "$staging"`
+  await runStoredCommand(server, 'sh -s', script, 30000)
+}
+
+async function verifyRemoteDeploymentArtifact(
+  server: StoredRemoteServer,
+  remotePath: string,
+  expectedSha256: string,
+): Promise<void> {
+  let output: string
+  if (server.os === 'windows') {
+    const script = `$hash=(Get-FileHash -Algorithm SHA256 -LiteralPath ${powerShellQuote(remotePath)}).Hash.ToLowerInvariant(); [Console]::Out.Write($hash)`
+    output = await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 30000)
+  } else {
+    const script = `set -eu\nfile=${posixQuote(remotePath)}\nif command -v sha256sum >/dev/null 2>&1; then sha256sum -- "$file" | awk '{print $1}'; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 -- "$file" | awk '{print $1}'; else printf '远程主机缺少 SHA-256 校验工具' >&2; exit 1; fi`
+    output = await runStoredCommand(server, 'sh -s', script, 30000)
+  }
+  if (output.trim().toLowerCase() !== expectedSha256.toLowerCase()) throw new Error('远程核心文件 SHA-256 校验失败')
+}
+
+async function commitRemoteDeployment(
+  server: StoredRemoteServer,
+  targetPath: string,
+  stagingPath: string,
+): Promise<void> {
+  if (server.os === 'windows') {
+    const script = `$target=${powerShellQuote(targetPath)}; $staging=${powerShellQuote(stagingPath)}; if (Test-Path -LiteralPath $target) { throw '目标目录已经存在' }; Move-Item -LiteralPath $staging -Destination $target`
+    await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 30000)
+    return
+  }
+  const script = `set -eu\ntarget=${posixQuote(targetPath)}\nstaging=${posixQuote(stagingPath)}\n[ ! -e "$target" ] || { printf '目标目录已经存在' >&2; exit 1; }\nmv -- "$staging" "$target"`
+  await runStoredCommand(server, 'sh -s', script, 30000)
+}
+
+async function removeRemoteDeploymentPath(server: StoredRemoteServer, targetPath: string): Promise<void> {
+  if (server.os === 'windows') {
+    const script = `$target=${powerShellQuote(targetPath)}; if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }`
+    await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 30000)
+    return
+  }
+  await runStoredCommand(server, 'sh -s', `set -eu\ntarget=${posixQuote(targetPath)}\nrm -rf -- "$target"`, 30000)
 }
 
 async function findMinecraftDirectories(server: StoredRemoteServer): Promise<RemoteMinecraftDirectory[]> {
@@ -921,7 +1461,8 @@ async function getMinecraftStatus(
   if (server.os === 'linux') {
     const script = String.raw`pid_file=${posixQuote(paths.pidPath)}
 directory=${posixQuote(minecraftServer.path)}
-jar_name=${posixQuote(minecraftServer.jarName)}
+launch_kind=${posixQuote(minecraftServer.launch.kind)}
+launch_target=${posixQuote(minecraftServer.launch.target)}
 if [ -f "$pid_file" ]; then
   pid=$(cat "$pid_file" 2>/dev/null || true)
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -936,13 +1477,19 @@ for process_directory in /proc/[0-9]*; do
   process_cwd=$(readlink -f -- "$process_directory/cwd" 2>/dev/null || true)
   [ "$process_cwd" = "$target" ] || continue
   executable=$(basename "$(readlink -f -- "$process_directory/exe" 2>/dev/null || true)")
+  if [ "$launch_kind" = native ]; then
+    [ "$executable" = "$(basename "$launch_target")" ] || continue
+    printf external
+    exit 0
+  fi
   case "$executable" in java|javaw) ;; *) continue ;; esac
-  if tr '\0' '\n' < "$process_directory/cmdline" | awk -v jar="$jar_name" '
-    previous == "-jar" {
+  if tr '\0' '\n' < "$process_directory/cmdline" | awk -v kind="$launch_kind" -v target="$launch_target" '
+    kind == "jar" && previous == "-jar" {
       argument=$0
-      sub(/^.*\//, "", argument)
-      if (argument == jar) found=1
+      sub(/^\.\//, "", argument)
+      if (argument == target) found=1
     }
+    kind == "java-args" && $0 == "@" target { found=1 }
     { previous=$0 }
     END { exit(found ? 0 : 1) }
   '; then
@@ -958,7 +1505,8 @@ printf stopped`
   if (server.os === 'macos') {
     const script = String.raw`pid_file=${posixQuote(paths.pidPath)}
 directory=${posixQuote(minecraftServer.path)}
-jar_name=${posixQuote(minecraftServer.jarName)}
+launch_kind=${posixQuote(minecraftServer.launch.kind)}
+launch_target=${posixQuote(minecraftServer.launch.target)}
 input_file=${posixQuote(paths.inputPath)}
 if [ -f "$pid_file" ]; then
   pid=$(cat "$pid_file" 2>/dev/null || true)
@@ -969,15 +1517,18 @@ if [ -f "$pid_file" ]; then
   rm -f "$pid_file" "$input_file"
 fi
 target=$(cd "$directory" 2>/dev/null && pwd -P)
-jar_path="$target/$jar_name"
-for pid in $(ps -axo pid=,comm= | awk '$2 ~ /(^|\/)java(w)?$/ { print $1 }'); do
+launch_path="$target/$launch_target"
+for pid in $(ps -axo pid=); do
   command_line=$(ps -p "$pid" -o command= 2>/dev/null || true)
-  case "$command_line" in
-    *"-jar $jar_name"*|*"-jar \"$jar_name\""*|*"$jar_path"*) ;;
-    *) continue ;;
-  esac
+  if [ "$launch_kind" = native ]; then
+    case "$command_line" in *"$launch_target"*|*"$launch_path"*) ;; *) continue ;; esac
+  elif [ "$launch_kind" = jar ]; then
+    case "$command_line" in *"-jar $launch_target"*|*"-jar \"$launch_target\""*|*"$launch_path"*) ;; *) continue ;; esac
+  else
+    case "$command_line" in *"@$launch_target"*|*"@$launch_path"*) ;; *) continue ;; esac
+  fi
   process_cwd=$(/usr/sbin/lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)
-  if [ "$process_cwd" = "$target" ] || printf '%s' "$command_line" | grep -F -- "$jar_path" >/dev/null 2>&1; then
+  if [ "$process_cwd" = "$target" ] || printf '%s' "$command_line" | grep -F -- "$launch_path" >/dev/null 2>&1; then
     printf external
     exit 0
   fi
@@ -996,9 +1547,19 @@ if (Test-Path -LiteralPath $pidPath) {
   }
   Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
 }
-$jarName=${powerShellQuote(minecraftServer.jarName)}
-$jarPattern='(?i)(?:^|\s)-jar\s+(?:"[^"]*[\\/]|[^\s"]*[\\/])?' + [regex]::Escape($jarName) + '(?:"|\s|$)'
-$candidates=@(Get-CimInstance Win32_Process -Filter "Name = 'java.exe' OR Name = 'javaw.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -match $jarPattern })
+$launchKind=${powerShellQuote(minecraftServer.launch.kind)}
+$launchTarget=${powerShellQuote(minecraftServer.launch.target)}
+$allProcesses=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+if ($launchKind -eq 'native') {
+  $nativeName=[System.IO.Path]::GetFileName($launchTarget)
+  $candidates=@($allProcesses | Where-Object { $_.Name -eq $nativeName })
+} elseif ($launchKind -eq 'jar') {
+  $launchPattern='(?i)(?:^|\s)-jar\s+"?(?:[^"\s]*[\\/])?' + [regex]::Escape($launchTarget) + '(?:"|\s|$)'
+  $candidates=@($allProcesses | Where-Object { ($_.Name -eq 'java.exe' -or $_.Name -eq 'javaw.exe') -and $_.CommandLine -and $_.CommandLine -match $launchPattern })
+} else {
+  $launchPattern='(?i)(?:^|\s)"?@' + [regex]::Escape($launchTarget) + '(?:"|\s|$)'
+  $candidates=@($allProcesses | Where-Object { ($_.Name -eq 'java.exe' -or $_.Name -eq 'javaw.exe') -and $_.CommandLine -and $_.CommandLine -match $launchPattern })
+}
 if ($candidates.Count -eq 0) {
   [Console]::Out.Write('stopped')
   exit 0
@@ -1026,8 +1587,7 @@ async function prepareRemoteRuntime(server: StoredRemoteServer, minecraftServer:
     ? { version: 1, transport: 'fifo', logPath: paths.logPath, inputPath: paths.inputPath }
     : { version: 1, transport: 'named-pipe', logPath: paths.logPath, pipeName: paths.pipeName }
   await withSftp(server, async sftp => {
-    const directory = await inspectMinecraftDirectory(sftp, server.os, minecraftServer.path)
-    if (!directory.jarFiles.includes(minecraftServer.jarName)) throw new Error(`找不到服务端 JAR：${minecraftServer.jarName}`)
+    await sftpStatFile(sftp, remoteJoin(minecraftServer.path, minecraftServer.launch.target))
     await sftpMkdir(sftp, paths.runtimeDirectory)
     await sftpWriteText(sftp, paths.controlPath, `${JSON.stringify(control, null, 2)}\n`)
     await sftpWriteText(sftp, remoteJoin(minecraftServer.path, 'eula.txt'), [
@@ -1036,7 +1596,7 @@ async function prepareRemoteRuntime(server: StoredRemoteServer, minecraftServer:
       'eula=true',
       '',
     ].join('\n'))
-    const marker = `\n[MST] ===== 远程会话 ${new Date().toISOString()} =====\n[MST] 启动 ${minecraftServer.jarName}，最大内存 ${minecraftServer.maxRam} MB\n`
+    const marker = `\n[MST] ===== 远程会话 ${new Date().toISOString()} =====\n[MST] 启动 ${minecraftServer.launch.target}，最大内存 ${minecraftServer.maxRam} MB\n`
     await sftpAppendText(sftp, paths.logPath, marker)
     if (server.os === 'windows') await sftpWriteText(sftp, paths.runnerPath, WINDOWS_RUNNER_SCRIPT)
   })
@@ -1052,6 +1612,7 @@ async function startMinecraftServer(server: StoredRemoteServer, minecraftServer:
   if (currentStatus === 'external') throw new Error('检测到该目录的 Minecraft 服务器已由外部进程启动')
   await prepareRemoteRuntime(server, minecraftServer)
   const paths = runtimePaths(minecraftServer)
+  const launchCommand = posixMinecraftLaunchCommand(minecraftServer)
   if (server.os === 'linux') {
     const script = `set -eu
 directory=${posixQuote(minecraftServer.path)}
@@ -1059,11 +1620,10 @@ runtime=${posixQuote(paths.runtimeDirectory)}
 pid_file=${posixQuote(paths.pidPath)}
 input_file=${posixQuote(paths.inputPath)}
 log_file=${posixQuote(paths.logPath)}
-jar_name=${posixQuote(minecraftServer.jarName)}
 rm -f "$input_file"
 mkfifo "$input_file"
 cd "$directory"
-nohup setsid sh -c 'fifo=$1; shift; exec 3<> "$fifo"; "$@" <&3; result=$?; exec 3>&-; rm -f "$fifo"; exit "$result"' mcstools "$input_file" java ${posixQuote(`-Xmx${minecraftServer.maxRam}M`)} -jar "$jar_name" nogui >> "$log_file" 2>&1 &
+nohup setsid sh -c 'fifo=$1; shift; exec 3<> "$fifo"; "$@" <&3; result=$?; exec 3>&-; rm -f "$fifo"; exit "$result"' mcstools "$input_file" ${launchCommand} >> "$log_file" 2>&1 &
 pid=$!
 printf '%s' "$pid" > "$pid_file"
 sleep 1
@@ -1077,11 +1637,10 @@ directory=${posixQuote(minecraftServer.path)}
 pid_file=${posixQuote(paths.pidPath)}
 input_file=${posixQuote(paths.inputPath)}
 log_file=${posixQuote(paths.logPath)}
-jar_name=${posixQuote(minecraftServer.jarName)}
 rm -f "$pid_file" "$input_file"
 mkfifo "$input_file"
 cd "$directory"
-nohup sh -c 'fifo=$1; shift; exec 3<> "$fifo"; exec "$@" <&3' mcstools "$input_file" java ${posixQuote(`-Xmx${minecraftServer.maxRam}M`)} -jar "$jar_name" nogui >> "$log_file" 2>&1 &
+nohup sh -c 'fifo=$1; shift; exec 3<> "$fifo"; exec "$@" <&3' mcstools "$input_file" ${launchCommand} >> "$log_file" 2>&1 &
 pid=$!
 printf '%s' "$pid" > "$pid_file"
 sleep 1
@@ -1089,7 +1648,7 @@ kill -0 "$pid" 2>/dev/null`
     await runStoredCommand(server, 'sh -s', script)
     return
   }
-  const runnerInvocation = `& ${powerShellQuote(paths.runnerPath)} -WorkingDirectory ${powerShellQuote(minecraftServer.path)} -JarName ${powerShellQuote(minecraftServer.jarName)} -MaxRam ${minecraftServer.maxRam} -PipeName ${powerShellQuote(paths.pipeName)} -LogPath ${powerShellQuote(paths.logPath)} -PidPath ${powerShellQuote(paths.pidPath)}`
+  const runnerInvocation = `& ${powerShellQuote(paths.runnerPath)} -WorkingDirectory ${powerShellQuote(minecraftServer.path)} -LaunchKind ${powerShellQuote(minecraftServer.launch.kind)} -LaunchTarget ${powerShellQuote(minecraftServer.launch.target)} -MaxRam ${minecraftServer.maxRam} -PipeName ${powerShellQuote(paths.pipeName)} -LogPath ${powerShellQuote(paths.logPath)} -PidPath ${powerShellQuote(paths.pidPath)}`
   const encodedInvocation = Buffer.from(runnerInvocation, 'utf16le').toString('base64')
   const script = `$pidPath=${powerShellQuote(paths.pidPath)}; Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue; Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encodedInvocation}') -WindowStyle Hidden; for ($i=0; $i -lt 30 -and -not (Test-Path -LiteralPath $pidPath); $i++) { Start-Sleep -Milliseconds 200 }; if (-not (Test-Path -LiteralPath $pidPath)) { throw 'Java 进程未能启动，请检查远程日志和 Java 环境' }`
   await runStoredCommand(server, encodeWindowsPowerShellCommand(script), '', 30000)
@@ -1163,7 +1722,7 @@ rm -f "$pid_file" "$input_file"`
     await runStoredCommand(server, 'sh -s', script)
     return
   }
-  const script = `$pidPath=${powerShellQuote(paths.pidPath)}; if (Test-Path -LiteralPath $pidPath) { $pidValue=Get-Content -LiteralPath $pidPath -Raw; if ($pidValue -match '^\\d+$') { & taskkill.exe /PID $pidValue /T /F | Out-Null }; Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue }`
+  const script = `$pidPath=${powerShellQuote(paths.pidPath)}; if (Test-Path -LiteralPath $pidPath) { $pidValue=Get-Content -LiteralPath $pidPath -Raw; if ($pidValue -match '^\\d+$') { $taskkill=Get-Command taskkill.exe -CommandType Application -ErrorAction SilentlyContinue; if ($taskkill) { & $taskkill.Source /PID $pidValue /T /F | Out-Null } else { Stop-Process -Id ([int]$pidValue) -Force -ErrorAction SilentlyContinue } }; Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue }`
   await runStoredCommand(server, encodeWindowsPowerShellCommand(script))
 }
 
@@ -1215,14 +1774,14 @@ if (Test-Path -LiteralPath $selectedLog) { Get-Content -LiteralPath $selectedLog
 
 async function collectMetrics(
   target: Pick<RemoteServerSummary, 'host' | 'port' | 'username' | 'os'>,
-  password: string,
+  auth: RemoteSshAuth,
   expectedFingerprint?: string,
 ): Promise<{ metrics: RemoteServerMetrics; fingerprint: string }> {
   const isWindows = target.os === 'windows'
   const metricsScript = target.os === 'macos' ? MACOS_METRICS_SCRIPT : LINUX_METRICS_SCRIPT
   const result = await executeRemote(
     target,
-    password,
+    auth,
     expectedFingerprint,
     isWindows ? encodeWindowsPowerShellCommand(WINDOWS_METRICS_SCRIPT) : 'sh -s',
     isWindows ? '' : metricsScript,
@@ -1234,6 +1793,135 @@ async function collectMetrics(
 }
 
 export class RemoteServerService {
+  private mainWindow: BrowserWindow | null = null
+  private readonly deploymentJobs = new Map<string, RemoteDeploymentJob>()
+  private readonly deploymentCancelRequests = new Set<string>()
+  private deploymentJobsLoaded = false
+  private deploymentPersistTimer: NodeJS.Timeout | null = null
+
+  setWindow(window: BrowserWindow): void {
+    this.mainWindow = window
+    this.ensureDeploymentJobsLoaded()
+  }
+
+  private ensureDeploymentJobsLoaded(): void {
+    if (this.deploymentJobsLoaded) return
+    this.deploymentJobsLoaded = true
+    let values: unknown[] = []
+    try {
+      values = readJsonStore<unknown[]>(deploymentStorePath(), [], Array.isArray, '远程部署任务')
+    } catch (error) {
+      console.error('Failed to read remote deployment jobs:', error)
+    }
+    const servers = readStoredServers()
+    const interrupted: Array<{ job: RemoteDeploymentJob; phase: RemoteDeploymentPhase }> = []
+    for (const value of values) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const item = value as Partial<RemoteDeploymentJob>
+      const server = servers.find(candidate => candidate.id === item.remoteServerId)
+      if (!server || typeof item.id !== 'string' || !REMOTE_DEPLOYMENT_PHASES.has(item.phase as RemoteDeploymentPhase)) continue
+      let input: RemoteDeploymentInput
+      let launch: RemoteMinecraftLaunchSpec | undefined
+      try {
+        input = normalizeRemoteDeploymentInput(server.os, item.input)
+        launch = item.launch ? validateRemoteLaunchSpec(item.launch) : undefined
+      } catch {
+        continue
+      }
+      const createdAt = typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt))
+        ? item.createdAt
+        : new Date(0).toISOString()
+      const updatedAt = typeof item.updatedAt === 'string' && Number.isFinite(Date.parse(item.updatedAt))
+        ? item.updatedAt
+        : createdAt
+      const phase = item.phase as RemoteDeploymentPhase
+      const job: RemoteDeploymentJob = {
+        id: item.id,
+        remoteServerId: server.id,
+        input,
+        phase,
+        progress: Math.max(0, Math.min(100, Math.round(Number(item.progress) || 0))),
+        message: typeof item.message === 'string' ? item.message : '',
+        createdAt,
+        updatedAt,
+        ...(typeof item.error === 'string' ? { error: item.error } : {}),
+        ...(typeof item.minecraftServerId === 'string' ? { minecraftServerId: item.minecraftServerId } : {}),
+        ...(launch ? { launch } : {}),
+      }
+      if (!TERMINAL_DEPLOYMENT_PHASES.has(phase)) {
+        job.phase = 'failed'
+        job.message = '应用退出导致部署中断，正在核对远程状态...'
+        job.error = '部署任务未正常结束'
+        job.updatedAt = new Date().toISOString()
+        interrupted.push({ job, phase })
+      }
+      this.deploymentJobs.set(job.id, job)
+    }
+    this.pruneDeploymentJobs()
+    this.persistDeploymentJobsNow()
+    for (const item of interrupted) void this.reconcileInterruptedDeployment(item.job, item.phase)
+  }
+
+  private persistDeploymentJobsNow(): void {
+    if (!this.deploymentJobsLoaded) return
+    if (this.deploymentPersistTimer) {
+      clearTimeout(this.deploymentPersistTimer)
+      this.deploymentPersistTimer = null
+    }
+    try {
+      writeJsonStore(deploymentStorePath(), [...this.deploymentJobs.values()].map(job => this.deploymentJobSnapshot(job)))
+    } catch (error) {
+      console.error('Failed to persist remote deployment jobs:', error)
+    }
+  }
+
+  private scheduleDeploymentJobsPersist(immediate = false): void {
+    if (immediate) {
+      this.persistDeploymentJobsNow()
+      return
+    }
+    if (this.deploymentPersistTimer) return
+    this.deploymentPersistTimer = setTimeout(() => this.persistDeploymentJobsNow(), 250)
+  }
+
+  private async reconcileInterruptedDeployment(job: RemoteDeploymentJob, previousPhase: RemoteDeploymentPhase): Promise<void> {
+    let server: StoredRemoteServer
+    try {
+      server = findStoredServer(job.remoteServerId)
+    } catch (error) {
+      this.updateDeploymentJob(job, 'failed', job.progress, '部署恢复失败', error instanceof Error ? error.message : String(error))
+      return
+    }
+    const stagingPath = deploymentStagingPath(job.input.targetPath, job.id)
+    if ((previousPhase === 'registering' || previousPhase === 'starting') && job.launch) {
+      try {
+        const existing = server.minecraftServers.find(item => item.path.toLowerCase() === job.input.targetPath.toLowerCase())
+        const minecraftServer = existing || await this.addMinecraftServer(job.remoteServerId, {
+          path: job.input.targetPath,
+          jarName: job.launch.target,
+          launch: job.launch,
+          coreType: job.input.coreId,
+          version: job.input.version,
+          remark: job.input.remark,
+          maxRam: job.input.maxRam,
+        })
+        job.minecraftServerId = minecraftServer.id
+        this.updateDeploymentJob(job, 'completed', 100, '已恢复中断部署；为避免重复启动，服务端保持停止')
+        return
+      } catch (error) {
+        try { await removeRemoteDeploymentPath(server, stagingPath) } catch {}
+        this.updateDeploymentJob(job, 'failed', job.progress, '无法恢复已中断的部署', error instanceof Error ? error.message : String(error))
+        return
+      }
+    }
+    try {
+      await removeRemoteDeploymentPath(server, stagingPath)
+      this.updateDeploymentJob(job, 'failed', job.progress, '部署已中断，远程临时目录已清理', '部署任务未正常结束')
+    } catch (error) {
+      this.updateDeploymentJob(job, 'failed', job.progress, '部署已中断，远程临时目录清理失败', error instanceof Error ? error.message : String(error))
+    }
+  }
+
   list(): RemoteServerSummary[] {
     return readStoredServers().map(summary)
   }
@@ -1250,7 +1938,7 @@ export class RemoteServerService {
       throw new Error('该服务器账户已经添加')
     }
 
-    const collected = await collectMetrics(input, input.password, input.expectedFingerprint)
+    const collected = await collectMetrics(input, inputSshAuth(input), input.expectedFingerprint)
     const current = readStoredServers()
     if (current.some(server => server.host === input.host && server.port === input.port && server.username === input.username)) {
       throw new Error('该服务器账户已经添加')
@@ -1262,9 +1950,17 @@ export class RemoteServerService {
       port: input.port,
       username: input.username,
       os: input.os,
+      authType: input.authType,
       hostFingerprint: collected.fingerprint,
       createdAt: new Date().toISOString(),
-      encryptedPassword: safeStorage.encryptString(input.password).toString('base64'),
+      ...(input.authType === 'password'
+        ? { encryptedPassword: safeStorage.encryptString(input.password || '').toString('base64') }
+        : {
+          encryptedPrivateKey: safeStorage.encryptString(input.privateKey || '').toString('base64'),
+          ...(input.passphrase
+            ? { encryptedPassphrase: safeStorage.encryptString(input.passphrase).toString('base64') }
+            : {}),
+        }),
       minecraftServers: [],
     }
     writeStoredServers([...current, server])
@@ -1281,12 +1977,265 @@ export class RemoteServerService {
   async getMetrics(id: string): Promise<RemoteServerMetrics> {
     const server = readStoredServers().find(item => item.id === id)
     if (!server) throw new Error('服务器不存在或已被删除')
-    const result = await collectMetrics(server, decryptPassword(server), server.hostFingerprint || undefined)
+    const result = await collectMetrics(server, storedSshAuth(server), server.hostFingerprint || undefined)
     if (!server.hostFingerprint && result.fingerprint) {
       const current = readStoredServers()
       writeStoredServers(current.map(item => item.id === id ? { ...item, hostFingerprint: result.fingerprint } : item))
     }
     return result.metrics
+  }
+
+  async preflightDeployment(remoteServerId: string, rawInput: unknown): Promise<RemoteDeploymentPreflight> {
+    const server = findStoredServer(remoteServerId)
+    const input = normalizeRemoteDeploymentInput(server.os, rawInput)
+    const artifact = await getCoreDownloadArtifact(input.coreId, input.version)
+    return probeRemoteDeployment(server, input, artifact)
+  }
+
+  startDeployment(remoteServerId: string, rawInput: unknown): RemoteDeploymentJob {
+    this.ensureDeploymentJobsLoaded()
+    const server = findStoredServer(remoteServerId)
+    const input = normalizeRemoteDeploymentInput(server.os, rawInput)
+    const activeForTarget = [...this.deploymentJobs.values()].some(job => (
+      job.remoteServerId === remoteServerId
+      && job.input.targetPath.toLowerCase() === input.targetPath.toLowerCase()
+      && !TERMINAL_DEPLOYMENT_PHASES.has(job.phase)
+    ))
+    if (activeForTarget) throw new Error('该目标目录已有部署任务正在进行')
+
+    const now = new Date().toISOString()
+    const job: RemoteDeploymentJob = {
+      id: randomUUID(),
+      remoteServerId,
+      input,
+      phase: 'queued',
+      progress: 0,
+      message: '部署任务已创建',
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.deploymentJobs.set(job.id, job)
+    this.pruneDeploymentJobs()
+    this.persistDeploymentJobsNow()
+    this.emitDeploymentJob(job)
+    void this.executeDeployment(server, job)
+    return this.deploymentJobSnapshot(job)
+  }
+
+  listDeploymentJobs(remoteServerId: string): RemoteDeploymentJob[] {
+    this.ensureDeploymentJobsLoaded()
+    findStoredServer(remoteServerId)
+    return [...this.deploymentJobs.values()]
+      .filter(job => job.remoteServerId === remoteServerId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(job => this.deploymentJobSnapshot(job))
+  }
+
+  cancelDeployment(remoteServerId: string, jobId: string): RemoteDeploymentJob {
+    this.ensureDeploymentJobsLoaded()
+    findStoredServer(remoteServerId)
+    const job = this.deploymentJobs.get(jobId)
+    if (!job || job.remoteServerId !== remoteServerId) throw new Error('部署任务不存在')
+    if (TERMINAL_DEPLOYMENT_PHASES.has(job.phase)) return this.deploymentJobSnapshot(job)
+    if (job.phase === 'registering' || job.phase === 'starting') throw new Error('部署已经提交，当前阶段不能取消')
+    this.deploymentCancelRequests.add(job.id)
+    this.updateDeploymentJob(job, job.phase, job.progress, '正在取消并清理部署任务...')
+    return this.deploymentJobSnapshot(job)
+  }
+
+  private deploymentJobSnapshot(job: RemoteDeploymentJob): RemoteDeploymentJob {
+    return { ...job, input: { ...job.input } }
+  }
+
+  private emitDeploymentJob(job: RemoteDeploymentJob): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    this.mainWindow.webContents.send('remoteDeployment:progress', this.deploymentJobSnapshot(job))
+  }
+
+  private updateDeploymentJob(
+    job: RemoteDeploymentJob,
+    phase: RemoteDeploymentPhase,
+    progress: number,
+    message: string,
+    error?: string,
+  ): void {
+    const previousPhase = job.phase
+    const previousProgress = job.progress
+    job.phase = phase
+    job.progress = Math.max(0, Math.min(100, Math.round(progress)))
+    job.message = message
+    job.updatedAt = new Date().toISOString()
+    if (error) job.error = error
+    else delete job.error
+    this.scheduleDeploymentJobsPersist(
+      TERMINAL_DEPLOYMENT_PHASES.has(phase) || phase !== previousPhase || Math.abs(job.progress - previousProgress) >= 5,
+    )
+    this.emitDeploymentJob(job)
+  }
+
+  private assertDeploymentNotCancelled(job: RemoteDeploymentJob): void {
+    if (!this.deploymentCancelRequests.has(job.id)) return
+    const error = new Error('部署已取消')
+    error.name = 'RemoteDeploymentCancelled'
+    throw error
+  }
+
+  private pruneDeploymentJobs(): void {
+    const terminal = [...this.deploymentJobs.values()]
+      .filter(job => TERMINAL_DEPLOYMENT_PHASES.has(job.phase))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    let changed = false
+    for (const job of terminal.slice(50)) changed = this.deploymentJobs.delete(job.id) || changed
+    if (changed) this.scheduleDeploymentJobsPersist()
+  }
+
+  private async executeDeployment(server: StoredRemoteServer, job: RemoteDeploymentJob): Promise<void> {
+    const localDirectory = path.join(app.getPath('temp'), 'MCServerTools-deployments', job.id)
+    const stagingPath = deploymentStagingPath(job.input.targetPath, job.id)
+    let stagingCreated = false
+    let committed = false
+    let registered = false
+
+    try {
+      this.updateDeploymentJob(job, 'preflight', 2, '正在检查远程环境...')
+      const artifact = await getCoreDownloadArtifact(job.input.coreId, job.input.version)
+      const preflight = await probeRemoteDeployment(server, job.input, artifact)
+      if (!preflight.canDeploy) throw new Error(preflight.warnings.join('；'))
+      this.assertDeploymentNotCancelled(job)
+
+      await createRemoteDeploymentStaging(server, job.input.targetPath, stagingPath)
+      stagingCreated = true
+
+      this.updateDeploymentJob(job, 'downloading', 10, `正在下载 ${artifact.fileName}...`)
+      fs.mkdirSync(localDirectory, { recursive: true })
+      const localArtifactPath = path.join(localDirectory, artifact.fileName)
+      await downloadFile(artifact.url, localArtifactPath, this.mainWindow || undefined, {
+        expectedSha256: artifact.sha256,
+        progressChannel: 'remoteDeployment:downloadProgress',
+      })
+      this.assertDeploymentNotCancelled(job)
+
+      const artifactSha256 = await sha256File(localArtifactPath)
+      let launch: RemoteMinecraftLaunchSpec
+      if (preflight.artifactKind === 'direct-jar') {
+        const remoteArtifactPath = remoteJoin(stagingPath, 'server.jar')
+        this.updateDeploymentJob(job, 'uploading', 45, '正在上传核心到云服务器...')
+        await withSftp(server, sftp => sftpUploadFile(sftp, localArtifactPath, remoteArtifactPath, (transferred, total) => {
+          const ratio = total > 0 ? transferred / total : 0
+          this.updateDeploymentJob(job, 'uploading', 45 + ratio * 30, `正在上传核心 ${Math.min(100, Math.round(ratio * 100))}%`)
+        }))
+        this.assertDeploymentNotCancelled(job)
+        this.updateDeploymentJob(job, 'verifying', 77, '正在校验远程核心文件...')
+        await verifyRemoteDeploymentArtifact(server, remoteArtifactPath, artifactSha256)
+        launch = { kind: 'jar', target: 'server.jar' }
+      } else if (preflight.artifactKind === 'java-installer') {
+        const installerName = '.mcstools-installer.jar'
+        const remoteArtifactPath = remoteJoin(stagingPath, installerName)
+        this.updateDeploymentJob(job, 'uploading', 45, '正在上传核心安装器...')
+        await withSftp(server, sftp => sftpUploadFile(sftp, localArtifactPath, remoteArtifactPath, (transferred, total) => {
+          const ratio = total > 0 ? transferred / total : 0
+          this.updateDeploymentJob(job, 'uploading', 45 + ratio * 20, `正在上传安装器 ${Math.min(100, Math.round(ratio * 100))}%`)
+        }))
+        this.updateDeploymentJob(job, 'verifying', 67, '正在校验远程安装器...')
+        await verifyRemoteDeploymentArtifact(server, remoteArtifactPath, artifactSha256)
+        this.assertDeploymentNotCancelled(job)
+        this.updateDeploymentJob(job, 'installing', 70, '正在远程安装核心及依赖...')
+        launch = await runRemoteCoreInstaller(server, stagingPath, installerName, job.input.coreId, job.input.version)
+      } else if (preflight.artifactKind === 'archive') {
+        this.updateDeploymentJob(job, 'installing', 42, '正在安全解压服务端文件...')
+        const payload = await prepareRemoteDeploymentArchive(
+          localArtifactPath,
+          path.join(localDirectory, 'payload'),
+          server.os,
+          job.input.coreId,
+        )
+        launch = validateRemoteLaunchSpec(payload.launch)
+        this.assertDeploymentNotCancelled(job)
+        this.updateDeploymentJob(job, 'uploading', 48, '正在上传服务端文件...')
+        await uploadPreparedArchive(server, stagingPath, payload, (transferred, total) => {
+          const ratio = total > 0 ? transferred / total : 0
+          this.updateDeploymentJob(job, 'uploading', 48 + ratio * 24, `正在上传服务端文件 ${Math.min(100, Math.round(ratio * 100))}%`)
+        }, () => this.assertDeploymentNotCancelled(job))
+        this.updateDeploymentJob(job, 'verifying', 74, '正在逐文件校验远程部署结果...')
+        await verifyRemoteDeploymentPayload(server, stagingPath, payload, localDirectory)
+      } else {
+        throw new Error('该核心返回了不支持的部署文件格式')
+      }
+      this.assertDeploymentNotCancelled(job)
+      await makeRemoteLaunchExecutable(server, stagingPath, launch)
+      job.launch = launch
+      this.persistDeploymentJobsNow()
+
+      this.updateDeploymentJob(job, 'configuring', 82, '正在写入服务器配置...')
+      const marker = {
+        version: 1,
+        deploymentId: job.id,
+        createdAt: new Date().toISOString(),
+        coreId: job.input.coreId,
+        coreVersion: job.input.version,
+        artifactSha256,
+        sourceSha256Provided: Boolean(artifact.sha256),
+        launch,
+      }
+      const properties = [
+        '# Generated by MCServerTools',
+        `server-port=${job.input.serverPort}`,
+        `motd=${job.input.name.replace(/[\\:=]/g, value => `\\${value}`)}`,
+        'online-mode=true',
+        '',
+      ].join('\n')
+      await withSftp(server, async sftp => {
+        await sftpWriteText(sftp, remoteJoin(stagingPath, 'eula.txt'), 'eula=true\n')
+        await sftpWriteText(sftp, remoteJoin(stagingPath, 'server.properties'), properties)
+        await sftpWriteText(sftp, remoteJoin(stagingPath, SERVER_PROFILE_FILE), serializeRemoteDeploymentProfile(job.input))
+        await sftpWriteText(sftp, remoteJoin(stagingPath, REMOTE_DEPLOYMENT_MARKER_FILE), `${JSON.stringify(marker, null, 2)}\n`)
+      })
+      this.assertDeploymentNotCancelled(job)
+
+      this.updateDeploymentJob(job, 'registering', 88, '正在原子提交远程部署目录...')
+      await commitRemoteDeployment(server, job.input.targetPath, stagingPath)
+      committed = true
+      stagingCreated = false
+
+      this.updateDeploymentJob(job, 'registering', 90, '正在注册远程 Minecraft 服务器...')
+      const minecraftServer = await this.addMinecraftServer(job.remoteServerId, {
+        path: job.input.targetPath,
+        jarName: launch.target,
+        launch,
+        coreType: job.input.coreId,
+        version: job.input.version,
+        remark: job.input.remark,
+        maxRam: job.input.maxRam,
+      })
+      registered = true
+      job.minecraftServerId = minecraftServer.id
+      this.persistDeploymentJobsNow()
+
+      if (job.input.startAfterDeploy) {
+        this.updateDeploymentJob(job, 'starting', 96, '部署完成，正在启动服务器...')
+        await this.startMinecraftServer(job.remoteServerId, minecraftServer.id, job.input.maxRam)
+      }
+
+      this.updateDeploymentJob(job, 'completed', 100, job.input.startAfterDeploy ? '部署并启动完成' : '部署完成')
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error))
+      let cleanupError = ''
+      if (!registered) {
+        const cleanupTarget = committed ? job.input.targetPath : stagingCreated ? stagingPath : ''
+        if (cleanupTarget) {
+          try { await removeRemoteDeploymentPath(server, cleanupTarget) } catch (cleanup) {
+            cleanupError = cleanup instanceof Error ? cleanup.message : String(cleanup)
+          }
+        }
+      }
+      const cancelled = normalized.name === 'RemoteDeploymentCancelled' || this.deploymentCancelRequests.has(job.id)
+      const message = cleanupError ? `${normalized.message}；清理失败：${cleanupError}` : normalized.message
+      this.updateDeploymentJob(job, cancelled ? 'cancelled' : 'failed', job.progress, cancelled ? '部署已取消' : '部署失败', message)
+    } finally {
+      this.deploymentCancelRequests.delete(job.id)
+      try { fs.rmSync(localDirectory, { recursive: true, force: true }) } catch {}
+      this.pruneDeploymentJobs()
+    }
   }
 
   listMinecraftServers(remoteServerId: string): RemoteMinecraftServer[] {
@@ -1312,8 +2261,12 @@ export class RemoteServerService {
   ): Promise<RemoteMinecraftServer> {
     const host = findStoredServer(remoteServerId)
     const inspected = await withSftp(host, sftp => inspectMinecraftDirectory(sftp, host.os, String(rawInput?.path || '')))
-    const jarName = validateRemoteJarName(rawInput?.jarName || inspected.suggestedJar)
-    if (!inspected.jarFiles.includes(jarName)) throw new Error(`所选目录中没有 ${jarName}`)
+    const launch = rawInput?.launch
+      ? validateRemoteLaunchSpec(rawInput.launch)
+      : validateRemoteLaunchSpec(undefined, validateRemoteJarName(rawInput?.jarName || inspected.suggestedJar))
+    const jarName = launch.target
+    if (!rawInput?.launch && !inspected.jarFiles.includes(jarName)) throw new Error(`所选目录中没有 ${jarName}`)
+    await withSftp(host, sftp => sftpStatFile(sftp, remoteJoin(inspected.path, launch.target)))
     const coreType = typeof rawInput?.coreType === 'string' ? rawInput.coreType.trim() : ''
     const version = typeof rawInput?.version === 'string' ? rawInput.version.trim() : ''
     const remark = typeof rawInput?.remark === 'string' ? rawInput.remark.trim() : ''
@@ -1329,6 +2282,7 @@ export class RemoteServerService {
       name: inspected.name,
       path: inspected.path,
       jarName,
+      launch,
       coreType,
       version,
       remark,

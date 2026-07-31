@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   discardManagedServerDirectory: (directory: string) => ipcRenderer.invoke('serverFiles:discardManagedDirectory', directory),
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   selectJavaExecutable: () => ipcRenderer.invoke('dialog:selectJavaExecutable'),
+  selectPrivateKey: () => ipcRenderer.invoke('dialog:selectPrivateKey'),
 
   detectJava: () => ipcRenderer.invoke('java:detect'),
   getJavaSystemProfile: () => ipcRenderer.invoke('java:getSystemProfile'),
@@ -69,6 +70,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   remoteMinecraftServerCommand: (remoteServerId: string, minecraftServerId: string, command: string) => ipcRenderer.invoke('remoteMinecraft:command', remoteServerId, minecraftServerId, command),
   remoteMinecraftServerReadProperties: (remoteServerId: string, minecraftServerId: string) => ipcRenderer.invoke('remoteMinecraft:readProperties', remoteServerId, minecraftServerId),
   remoteMinecraftServerWriteProperties: (remoteServerId: string, minecraftServerId: string, content: string) => ipcRenderer.invoke('remoteMinecraft:writeProperties', remoteServerId, minecraftServerId, content),
+  remoteDeploymentPreflight: (remoteServerId: string, input: any) => ipcRenderer.invoke('remoteDeployment:preflight', remoteServerId, input),
+  remoteDeploymentStart: (remoteServerId: string, input: any) => ipcRenderer.invoke('remoteDeployment:start', remoteServerId, input),
+  remoteDeploymentJobs: (remoteServerId: string) => ipcRenderer.invoke('remoteDeployment:list', remoteServerId),
+  remoteDeploymentCancel: (remoteServerId: string, jobId: string) => ipcRenderer.invoke('remoteDeployment:cancel', remoteServerId, jobId),
+  onRemoteDeploymentProgress: (callback: (job: any) => void) => {
+    const h = (_: any, job: any) => callback(job)
+    ipcRenderer.on('remoteDeployment:progress', h)
+    return () => { ipcRenderer.removeListener('remoteDeployment:progress', h) }
+  },
 
   onServerLog: (callback: (event: any) => void) => {
     const h = (_: any, event: any) => callback(event)

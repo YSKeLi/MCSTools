@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Cloud, Eye, EyeOff, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { Cloud, Eye, EyeOff, FileKey2, KeyRound, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { AlertBanner, Badge, Button, Dialog, Field, IconButton, Spinner } from '../components/ui'
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
   onOpenServer: (serverId: string) => void
 }
 
-const EMPTY_FORM: RemoteServerInput = { name: '', host: '', port: 22, username: 'root', password: '', os: 'linux' }
+const EMPTY_FORM: RemoteServerInput = { name: '', host: '', port: 22, username: 'root', authType: 'password', password: '', os: 'linux' }
 
 function remoteOsLabel(os: RemoteServerOs): string {
   if (os === 'windows') return 'Windows'
@@ -82,6 +82,16 @@ export function RemoteServerPage({ active, onOpenServer }: Props) {
     }
   }
 
+  async function handleSelectPrivateKey() {
+    setAddError('')
+    try {
+      const selected = await window.electronAPI.selectPrivateKey()
+      if (selected) setForm(current => ({ ...current, privateKey: selected.content, privateKeyName: selected.name }))
+    } catch (selectError) {
+      setAddError(cleanError(selectError))
+    }
+  }
+
   async function handleDelete() {
     if (!deleteTarget) return
     setDeleteLoading(true)
@@ -98,7 +108,8 @@ export function RemoteServerPage({ active, onOpenServer }: Props) {
     }
   }
 
-  const canAdd = Boolean(form.name.trim() && form.host.trim() && form.username.trim() && form.password && Number.isInteger(Number(form.port)) && Number(form.port) >= 1 && Number(form.port) <= 65535)
+  const hasCredential = form.authType === 'private-key' ? Boolean(form.privateKey) : Boolean(form.password)
+  const canAdd = Boolean(form.name.trim() && form.host.trim() && form.username.trim() && hasCredential && Number.isInteger(Number(form.port)) && Number(form.port) >= 1 && Number(form.port) <= 65535)
 
   return (
     <div className="page-stack">
@@ -121,7 +132,7 @@ export function RemoteServerPage({ active, onOpenServer }: Props) {
                   <strong>{server.name}</strong>
                   <span className="mono">{server.username}@{server.host}:{server.port}</span>
                 </span>
-                <Badge>{remoteOsLabel(server.os)}</Badge>
+                <Badge>{remoteOsLabel(server.os)} / {server.authType === 'private-key' ? '私钥' : '密码'}</Badge>
                 <span className="remote-host-row__open">打开管理</span>
               </button>
               <IconButton tone="danger" onClick={() => setDeleteTarget(server)} title="删除连接" aria-label={`删除 ${server.name}`}><Trash2 /></IconButton>
@@ -141,7 +152,20 @@ export function RemoteServerPage({ active, onOpenServer }: Props) {
           }}><option value="linux">Linux</option><option value="windows">Windows Server</option><option value="macos">macOS</option></select></Field>
           <div className="form-grid"><Field label="服务器地址"><input className="ui-input" placeholder="IP 地址或域名" value={form.host} onChange={event => updateForm('host', event.target.value)} disabled={addLoading} /></Field><Field label="SSH 端口"><input className="ui-input" type="number" min={1} max={65535} value={form.port} onChange={event => updateForm('port', Number(event.target.value))} disabled={addLoading} /></Field></div>
           <Field label="账户名"><input className="ui-input" value={form.username} onChange={event => updateForm('username', event.target.value)} disabled={addLoading} /></Field>
-          <Field label="密码"><div className="input-with-action"><input className="ui-input" type={showPassword ? 'text' : 'password'} value={form.password} onChange={event => updateForm('password', event.target.value)} disabled={addLoading} /><IconButton onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? '隐藏密码' : '显示密码'}>{showPassword ? <EyeOff /> : <Eye />}</IconButton></div></Field>
+          <Field label="认证方式">
+            <div className="remote-auth-switch" role="radiogroup" aria-label="SSH 认证方式">
+              <button type="button" role="radio" aria-checked={form.authType === 'password'} className={form.authType === 'password' ? 'is-active' : ''} onClick={() => setForm(current => ({ ...current, authType: 'password', privateKey: undefined, privateKeyName: undefined, passphrase: undefined }))} disabled={addLoading}><KeyRound />密码</button>
+              <button type="button" role="radio" aria-checked={form.authType === 'private-key'} className={form.authType === 'private-key' ? 'is-active' : ''} onClick={() => setForm(current => ({ ...current, authType: 'private-key', password: '' }))} disabled={addLoading}><FileKey2 />私钥</button>
+            </div>
+          </Field>
+          {form.authType === 'password' ? (
+            <Field label="密码"><div className="input-with-action"><input className="ui-input" type={showPassword ? 'text' : 'password'} value={form.password || ''} onChange={event => updateForm('password', event.target.value)} disabled={addLoading} /><IconButton onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? '隐藏密码' : '显示密码'}>{showPassword ? <EyeOff /> : <Eye />}</IconButton></div></Field>
+          ) : (
+            <>
+              <Field label="私钥文件"><Button className="remote-key-picker" variant="secondary" startIcon={<FileKey2 />} onClick={() => void handleSelectPrivateKey()} disabled={addLoading}>{form.privateKeyName || '选择私钥文件'}</Button></Field>
+              <Field label="私钥口令（可选）"><div className="input-with-action"><input className="ui-input" type={showPassword ? 'text' : 'password'} value={form.passphrase || ''} onChange={event => updateForm('passphrase', event.target.value)} disabled={addLoading} /><IconButton onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? '隐藏口令' : '显示口令'}>{showPassword ? <EyeOff /> : <Eye />}</IconButton></div></Field>
+            </>
+          )}
         </div>
       </Dialog>
 

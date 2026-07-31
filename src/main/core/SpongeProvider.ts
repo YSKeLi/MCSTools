@@ -7,7 +7,7 @@ export class SpongeProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'sponge', name: 'Sponge', type: 'modded',
     description: '全新架构的 Mod API，稳定且高性能',
-    color: '#FFD700', iconUrl: '/icons/sponge.ico',
+    color: '#FFD700', iconUrl: './icons/sponge.ico',
   }
 
   private browseBaseUrl = 'https://repo.spongepowered.org/service/rest/repository/browse/maven-releases/org/spongepowered/spongevanilla'

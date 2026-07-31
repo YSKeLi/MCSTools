@@ -7,7 +7,7 @@ export class CraftBukkitProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'craftbukkit', name: 'CraftBukkit', type: 'bukkit',
     description: '最早的 Bukkit 服务端实现，需通过 BuildTools 编译',
-    color: '#FF9800', iconUrl: '/icons/craftbukkit.ico',
+    color: '#FF9800', iconUrl: './icons/craftbukkit.ico',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {
@@ -29,7 +29,7 @@ export class SpigotProvider implements CoreProvider {
   info: CoreInfo = {
     id: 'spigot', name: 'Spigot', type: 'bukkit',
     description: 'CraftBukkit 优化版，性能更好，插件兼容',
-    color: '#FFB74D', iconUrl: '/icons/spigot.svg',
+    color: '#FFB74D', iconUrl: './icons/spigot.svg',
   }
 
   async fetchVersions(): Promise<CoreVersion[]> {

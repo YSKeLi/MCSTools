@@ -8,6 +8,7 @@ const {
   remoteJoin,
   remoteParentPath,
   validateRemoteJarName,
+  validateRemoteLaunchSpec,
 } = require('../dist/main/remote/remoteMinecraftPolicy.js')
 const { detectServerFiles } = require('../dist/main/detect.js')
 
@@ -24,6 +25,20 @@ test('normalizes Linux, macOS, and Windows remote Minecraft paths', () => {
   assert.equal(remoteParentPath('macos', '/'), null)
   assert.equal(remoteParentPath('windows', 'D:/Minecraft/Paper'), 'D:/Minecraft')
   assert.equal(remoteParentPath('windows', 'D:/'), '')
+})
+
+test('validates constrained remote launch specifications', () => {
+  assert.deepEqual(validateRemoteLaunchSpec(undefined, 'server.jar'), { kind: 'jar', target: 'server.jar' })
+  assert.deepEqual(validateRemoteLaunchSpec({ kind: 'java-args', target: 'libraries/net/example/unix_args.txt' }), {
+    kind: 'java-args',
+    target: 'libraries/net/example/unix_args.txt',
+  })
+  assert.deepEqual(validateRemoteLaunchSpec({ kind: 'native', target: 'bedrock_server.exe' }), {
+    kind: 'native',
+    target: 'bedrock_server.exe',
+  })
+  assert.throws(() => validateRemoteLaunchSpec({ kind: 'native', target: '../server.exe' }))
+  assert.throws(() => validateRemoteLaunchSpec({ kind: 'java-args', target: 'run.sh' }))
 })
 
 test('rejects relative paths and unsafe jar names', () => {

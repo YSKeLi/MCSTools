@@ -12,7 +12,7 @@ export function AboutPage() {
   return (
     <div className="about-page">
       <div className="about-page__content">
-        <img className="about-page__icon" src="/icons/app-icon.ico" alt="" />
+        <img className="about-page__icon" src="./icons/app-icon.ico" alt="" />
         <h1 className="about-page__title">Minecraft 服务器搭建工具</h1>
         <p className="about-page__meta">版本 {version || '...'}</p>
         <p className="about-page__meta">制作者：小亚</p>

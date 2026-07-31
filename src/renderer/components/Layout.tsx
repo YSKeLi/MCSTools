@@ -80,7 +80,7 @@ export function Layout({ page, onPageChange, onExitSettings, onExitCloudServer, 
     <div className="app-shell">
       <aside className="app-sidebar">
         <div className="app-brand">
-          <img className="app-brand__logo" src="/icons/app-icon.png" alt="" />
+          <img className="app-brand__logo" src="./icons/app-icon.png" alt="" />
           <div className="app-brand__copy">
             <h1 className="app-brand__title">MC Server Tools</h1>
           </div>

@@ -79,15 +79,25 @@ declare global {
   }
 
   type RemoteServerOs = 'linux' | 'windows' | 'macos'
+  type RemoteServerAuthType = 'password' | 'private-key'
 
   interface RemoteServerInput {
     name: string
     host: string
     port: number
     username: string
-    password: string
+    authType: RemoteServerAuthType
+    password?: string
+    privateKey?: string
+    privateKeyName?: string
+    passphrase?: string
     os: RemoteServerOs
     expectedFingerprint?: string
+  }
+
+  interface RemotePrivateKeySelection {
+    name: string
+    content: string
   }
 
   interface RemoteServerFingerprintInput {
@@ -103,6 +113,7 @@ declare global {
     port: number
     username: string
     os: RemoteServerOs
+    authType: RemoteServerAuthType
     hostFingerprint: string
     createdAt: string
   }
@@ -281,11 +292,19 @@ declare global {
     name: string
     path: string
     jarName: string
+    launch: RemoteMinecraftLaunchSpec
     coreType: string
     version: string
     remark: string
     maxRam: number
     createdAt: string
+  }
+
+  type RemoteMinecraftLaunchKind = 'jar' | 'java-args' | 'native'
+
+  interface RemoteMinecraftLaunchSpec {
+    kind: RemoteMinecraftLaunchKind
+    target: string
   }
 
   interface RemoteMinecraftServerInput {
@@ -295,9 +314,56 @@ declare global {
     version: string
     remark: string
     maxRam?: number
+    launch?: RemoteMinecraftLaunchSpec
   }
 
   type RemoteMinecraftServerStatus = 'running' | 'external' | 'stopped' | 'error'
+
+  type RemoteDeploymentArtifactKind = 'direct-jar' | 'java-installer' | 'archive' | 'unsupported'
+
+  type RemoteDeploymentPhase = 'queued' | 'preflight' | 'downloading' | 'uploading' | 'verifying' | 'installing' | 'configuring' | 'registering' | 'starting' | 'completed' | 'failed' | 'cancelled'
+
+  interface RemoteDeploymentInput {
+    name: string
+    targetPath: string
+    coreId: string
+    coreName: string
+    version: string
+    remark: string
+    maxRam: number
+    serverPort: number
+    eulaAccepted: boolean
+    startAfterDeploy?: boolean
+  }
+
+  interface RemoteDeploymentPreflight {
+    targetPath: string
+    artifactName: string
+    artifactKind: RemoteDeploymentArtifactKind
+    requiredJavaMajor: number
+    javaMajor: number | null
+    architecture: string
+    availableBytes: number
+    targetExists: boolean
+    parentWritable: boolean
+    portAvailable: boolean
+    canDeploy: boolean
+    warnings: string[]
+  }
+
+  interface RemoteDeploymentJob {
+    id: string
+    remoteServerId: string
+    input: RemoteDeploymentInput
+    phase: RemoteDeploymentPhase
+    progress: number
+    message: string
+    createdAt: string
+    updatedAt: string
+    error?: string
+    minecraftServerId?: string
+    launch?: RemoteMinecraftLaunchSpec
+  }
 
   interface ServerPlayerSnapshot {
     serverId: string | null
@@ -351,6 +417,7 @@ declare global {
     discardManagedServerDirectory: (directory: string) => Promise<void>
     selectDirectory: () => Promise<string | null>
     selectJavaExecutable: () => Promise<string | null>
+    selectPrivateKey: () => Promise<RemotePrivateKeySelection | null>
     detectJava: () => Promise<JavaInfo | null>
     getJavaSystemProfile: () => Promise<JavaSystemProfile>
     getJavaPackages: () => Promise<JavaDownloadPackage[]>
@@ -384,6 +451,11 @@ declare global {
     remoteMinecraftServerCommand: (remoteServerId: string, minecraftServerId: string, command: string) => Promise<void>
     remoteMinecraftServerReadProperties: (remoteServerId: string, minecraftServerId: string) => Promise<string>
     remoteMinecraftServerWriteProperties: (remoteServerId: string, minecraftServerId: string, content: string) => Promise<void>
+    remoteDeploymentPreflight: (remoteServerId: string, input: RemoteDeploymentInput) => Promise<RemoteDeploymentPreflight>
+    remoteDeploymentStart: (remoteServerId: string, input: RemoteDeploymentInput) => Promise<RemoteDeploymentJob>
+    remoteDeploymentJobs: (remoteServerId: string) => Promise<RemoteDeploymentJob[]>
+    remoteDeploymentCancel: (remoteServerId: string, jobId: string) => Promise<RemoteDeploymentJob>
+    onRemoteDeploymentProgress: (callback: (job: RemoteDeploymentJob) => void) => () => void
     onServerLog: (callback: (event: ServerLogEvent) => void) => () => void
     onServerStatus: (callback: (state: ServerRuntimeState) => void) => () => void
     onServerPlayers: (callback: (snapshot: ServerPlayerSnapshot) => void) => () => void

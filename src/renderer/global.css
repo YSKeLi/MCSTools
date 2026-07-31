@@ -1696,6 +1696,72 @@ a:focus-visible {
   grid-column: 1 / -1;
 }
 
+.remote-auth-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  min-height: var(--control-height);
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+
+.remote-auth-switch button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.remote-auth-switch button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.remote-auth-switch button.is-active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-control);
+}
+
+.remote-auth-switch button:focus-visible {
+  outline: 0;
+  box-shadow: var(--shadow-focus);
+}
+
+.remote-auth-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.remote-auth-switch svg,
+.remote-key-picker svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.remote-key-picker {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.remote-key-picker .ui-button__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ui-tabs {
   display: flex;
   gap: 18px;

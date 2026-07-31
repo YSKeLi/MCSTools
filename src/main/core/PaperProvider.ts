@@ -14,7 +14,7 @@ export class PaperProvider implements CoreProvider {
     type: 'bukkit',
     description: '高性能 Bukkit 分支，修复了大量 Vanilla/Spigot 漏洞，社区最活跃',
     color: '#F5A623',
-    iconUrl: '/icons/paper.ico',
+    iconUrl: './icons/paper.ico',
   }
 
   private baseUrl = 'https://api.papermc.io/v2/projects/paper'

@@ -33,12 +33,14 @@
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",
+    "extract-zip": "^2.0.1",
     "lucide-react": "^1.26.0",
     "opencc-js": "^1.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ssh2": "^1.17.0",
-    "systeminformation": "^5.33.0"
+    "systeminformation": "^5.33.0",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",

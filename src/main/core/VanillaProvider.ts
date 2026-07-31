@@ -21,7 +21,7 @@ export class VanillaProvider implements CoreProvider {
     type: 'vanilla',
     description: 'Mojang 官方原版服务端，最纯净的 Minecraft 体验',
     color: '#4CAF50',
-    iconUrl: '/icons/vanilla.ico',
+    iconUrl: './icons/vanilla.ico',
   }
 
   private manifestUrl = 'https://piston-meta.mojang.com/mc/game/version_manifest.json'

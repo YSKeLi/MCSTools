@@ -50,6 +50,27 @@ test('keeps valid records even when their server directory is currently unavaila
   assert.equal(result.invalid.length, 0)
 })
 
+test('repairs legacy root-relative icon URLs for packaged file pages', () => {
+  const record = {
+    id: 'server-1',
+    name: 'Paper',
+    path: path.resolve('paper-server'),
+    coreId: 'paper',
+    coreName: 'Paper',
+    version: '1.21',
+    jarName: 'paper.jar',
+    iconUrl: '/icons/paper.ico',
+    createdAt: '2026-07-24T00:00:00.000Z',
+    maxRam: 4096,
+    managedPath: false,
+  }
+
+  const result = repairStoredServers([record], idGenerator())
+
+  assert.equal(result.servers[0].iconUrl, './icons/paper.ico')
+  assert.equal(result.repairedCount, 1)
+})
+
 test('repairs duplicate ids without discarding either server', () => {
   const base = {
     id: 'duplicate',

@@ -38,6 +38,7 @@ let state: ManagedProcessState = {
   sessionId: config.sessionId,
   runnerPid: process.pid,
   childPid: null,
+  childExecutable: config.executable,
   status: 'starting',
   logPath: config.logPath,
   commandPath: config.commandPath,

@@ -29,6 +29,7 @@ export interface ManagedProcessState {
   sessionId: string
   runnerPid: number
   childPid: number | null
+  childExecutable?: string
   status: ManagedProcessStatus
   logPath: string
   commandPath: string

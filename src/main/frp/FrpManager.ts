@@ -6,6 +6,7 @@ import * as path from 'path'
 import { PersistentProcessController } from '../runtime/PersistentProcessController'
 import { downloadFile } from '../utils/download'
 import { extractFrpArchive } from './archive'
+import { withPersistentFrpLogin } from './configPolicy'
 
 export interface FrpConfig {
   serverAddr: string
@@ -301,6 +302,7 @@ export class FrpManager {
     const name = config.name || 'minecraft-server'
     return `serverAddr = "${config.serverAddr}"
 serverPort = ${config.serverPort || 7000}
+loginFailExit = false
 ${config.token ? `auth.method = "token"
 auth.token = "${config.token}"
 ` : ''}
@@ -335,7 +337,16 @@ remotePort = ${config.remotePort || config.localPort}
     try {
       if (!fs.existsSync(configFilePath)) throw new Error('导入的配置文件不存在')
       const frpcPath = await this.ensureBinary(this.mainWindow || undefined)
-      await this.spawnProcess(frpcPath, configFilePath, `使用导入配置启动 -> ${configFilePath}`, serviceId)
+      const runtimeConfigPath = path.join(this.runtimeDirectory, 'imported.frpc.toml')
+      const sourceConfig = fs.readFileSync(configFilePath, 'utf8')
+      fs.writeFileSync(runtimeConfigPath, withPersistentFrpLogin(sourceConfig), 'utf8')
+      await this.spawnProcess(
+        frpcPath,
+        runtimeConfigPath,
+        `使用导入配置启动 -> ${configFilePath}`,
+        serviceId,
+        path.dirname(configFilePath),
+      )
     } catch (e: any) {
       this.emitLog(`[FRP] 错误: ${e.message}`)
       this.emitStatus('error')
@@ -355,13 +366,19 @@ remotePort = ${config.remotePort || config.localPort}
     }
   }
 
-  private async spawnProcess(frpcPath: string, configPath: string, message: string, serviceId = configPath) {
+  private async spawnProcess(
+    frpcPath: string,
+    configPath: string,
+    message: string,
+    serviceId = configPath,
+    cwd = path.dirname(configPath),
+  ) {
     await this.controller.start({
       service: 'frp',
       serviceId,
       executable: frpcPath,
       args: ['-c', configPath],
-      cwd: path.dirname(configPath),
+      cwd,
       logPath: this.logPath,
       stdoutPrefix: '[FRP] ',
       stderrPrefix: '[FRP] ',

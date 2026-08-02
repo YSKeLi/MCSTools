@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -22,6 +22,57 @@ function isProcessAlive(pid: number | null | undefined): boolean {
   } catch {
     return false
   }
+}
+
+type ManagedChildStatus = 'stopped' | 'matching' | 'mismatched' | 'unknown'
+
+function runningExecutable(pid: number): string | null {
+  if (!isProcessAlive(pid)) return null
+
+  if (process.platform === 'linux') {
+    try {
+      return fs.readlinkSync(`/proc/${pid}/exe`)
+    } catch {
+      return ''
+    }
+  }
+
+  if (process.platform === 'win32') {
+    const command = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue; if ($null -ne $p) { if ($p.ExecutablePath) { [Console]::Out.Write($p.ExecutablePath) } else { [Console]::Out.Write($p.Name) } }`
+    const encodedCommand = Buffer.from(command, 'utf16le').toString('base64')
+    const result = spawnSync('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-EncodedCommand', encodedCommand,
+    ], { encoding: 'utf8', windowsHide: true, timeout: 3000 })
+    return result.status === 0 ? result.stdout.trim() : ''
+  }
+
+  const result = spawnSync('ps', ['-p', String(pid), '-o', 'comm='], {
+    encoding: 'utf8',
+    timeout: 3000,
+  })
+  return result.status === 0 ? result.stdout.trim() : ''
+}
+
+function executableName(value: string): string {
+  const name = path.basename(value.trim()).toLowerCase()
+  return process.platform === 'win32' ? name.replace(/\.exe$/, '') : name
+}
+
+function managedChildStatus(state: ManagedProcessState): ManagedChildStatus {
+  if (!state.childPid || !isProcessAlive(state.childPid)) return 'stopped'
+  const actualExecutable = runningExecutable(state.childPid)
+  if (!actualExecutable) return 'unknown'
+
+  const expectedExecutable = state.childExecutable
+    || (state.service === 'frp' ? 'frpc' : '')
+  if (!expectedExecutable) return 'unknown'
+  return executableName(actualExecutable) === executableName(expectedExecutable)
+    ? 'matching'
+    : 'mismatched'
 }
 
 function writeJsonAtomic(filePath: string, value: unknown) {
@@ -147,8 +198,12 @@ export class PersistentProcessController {
     if (this.state && ACTIVE_STATUSES.has(this.state.status) && isProcessAlive(this.state.runnerPid)) {
       throw new Error('已有托管进程正在运行')
     }
-    if (this.state?.childPid && isProcessAlive(this.state.childPid)) {
-      throw new Error('检测到上次运行的子进程仍存在，但托管连接已丢失；请先在系统中结束该进程')
+    if (this.state?.childPid) {
+      const childStatus = managedChildStatus(this.state)
+      if (childStatus === 'matching' || childStatus === 'unknown') {
+        throw new Error('检测到上次运行的子进程仍存在，但托管连接已丢失；请先在系统中结束该进程')
+      }
+      if (childStatus === 'mismatched') this.clearReusedChildPid()
     }
 
     const sessionId = randomUUID()
@@ -170,6 +225,7 @@ export class PersistentProcessController {
       sessionId,
       runnerPid: 0,
       childPid: null,
+      childExecutable: spec.executable,
       status: 'starting',
       logPath: spec.logPath,
       commandPath,
@@ -316,12 +372,25 @@ export class PersistentProcessController {
 
   private repairStaleState() {
     if (!this.state || !ACTIVE_STATUSES.has(this.state.status) || isProcessAlive(this.state.runnerPid)) return
-    const wasOrphaned = isProcessAlive(this.state.childPid)
+    const childStatus = managedChildStatus(this.state)
+    const wasOrphaned = childStatus === 'matching' || childStatus === 'unknown'
     this.state = {
       ...this.state,
+      childPid: childStatus === 'mismatched' ? null : this.state.childPid,
       status: 'error',
       updatedAt: new Date().toISOString(),
       error: wasOrphaned ? '托管运行器已断开，但子进程可能仍在运行' : '上次运行未正常结束',
+    }
+    writeJsonAtomic(this.statePath, this.state)
+  }
+
+  private clearReusedChildPid() {
+    if (!this.state) return
+    this.state = {
+      ...this.state,
+      childPid: null,
+      updatedAt: new Date().toISOString(),
+      error: '旧进程 PID 已被其他程序复用，托管状态已自动清理',
     }
     writeJsonAtomic(this.statePath, this.state)
   }

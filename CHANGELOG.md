@@ -2,6 +2,18 @@
 
 All notable changes to MCServerTools are documented in this file.
 
+## v1.0.7
+
+### 关键改动
+
+- [PersistentProcessController.ts (line 29)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/runtime/PersistentProcessController.ts#L29)：托管状态记录并核对实际子进程可执行文件，兼容 Windows、Linux 和 macOS 的进程恢复。
+- [configPolicy.ts (line 1)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/frp/configPolicy.ts#L1)：导入的 FRP 配置通过运行时副本启用持续重连，不修改用户原始配置文件。
+
+### Bug 修复
+
+- [PersistentProcessController.ts (line 202)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/runtime/PersistentProcessController.ts#L202)：修复 Windows 复用旧 PID 后把 `WidgetService.exe` 等其他程序误判为遗留 FRP 进程，导致无法再次启动的问题。
+- [FrpManager.ts (line 334)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/frp/FrpManager.ts#L334)：设置 `loginFailExit = false`，修复 FRP 首次连接超时后直接退出、不再自动重试的问题。
+
 ## v1.0.6
 
 ### 关键改动

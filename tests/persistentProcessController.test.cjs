@@ -105,3 +105,57 @@ test('restores a managed process and its logs after the controller restarts', as
     fs.rmSync(runtimeDirectory, { recursive: true, force: true })
   }
 })
+
+test('ignores a stale FRP child PID that was reused by another executable', async () => {
+  const runtimeDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcst-runtime-reused-pid-'))
+  const logPath = path.join(runtimeDirectory, 'frp.log')
+  const statePath = path.join(runtimeDirectory, 'state.json')
+  fs.writeFileSync(statePath, `${JSON.stringify({
+    version: 1,
+    service: 'frp',
+    serviceId: 'stale-frp',
+    sessionId: 'stale-session',
+    runnerPid: 2147483647,
+    childPid: process.pid,
+    status: 'error',
+    logPath,
+    commandPath: path.join(runtimeDirectory, 'stale-commands.ndjson'),
+    startedAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  }, null, 2)}\n`, 'utf8')
+
+  const controller = new PersistentProcessController({
+    runtimeDirectory,
+    service: 'frp',
+    onLog: () => undefined,
+    onState: () => undefined,
+  })
+
+  try {
+    const started = await controller.start({
+      service: 'frp',
+      serviceId: 'replacement-frp',
+      executable: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cwd: runtimeDirectory,
+      logPath,
+      stdoutPrefix: '',
+      stderrPrefix: '[ERR] ',
+      stopMode: 'signal',
+      stopTimeoutMs: 1000,
+      initialLogs: [],
+    })
+    assert.equal(started.status, 'running')
+    assert.equal(started.serviceId, 'replacement-frp')
+    assert.equal(started.childExecutable, process.execPath)
+    controller.stop(true)
+    await waitFor(() => controller.getState()?.status === 'stopped', 'replacement process did not stop')
+  } finally {
+    try {
+      if (controller.isRunning()) controller.stop(true)
+    } catch {}
+    controller.dispose()
+    await new Promise(resolve => setTimeout(resolve, 100))
+    fs.rmSync(runtimeDirectory, { recursive: true, force: true })
+  }
+})

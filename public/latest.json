@@ -1,122 +1,114 @@
 {
   "repo": "YSKeLi/MCSTools",
   "source": "github-release",
-  "version": "1.0.6",
-  "tag": "v1.0.6",
-  "title": "v1.0.6",
-  "publishedAt": "2026-07-31T12:09:04Z",
-  "url": "https://github.com/YSKeLi/MCSTools/releases/tag/v1.0.6",
+  "version": "1.0.7",
+  "tag": "v1.0.7",
+  "title": "v1.0.7",
+  "publishedAt": "2026-08-02T08:13:53Z",
+  "url": "https://github.com/YSKeLi/MCSTools/releases/tag/v1.0.7",
   "assets": [
     {
       "name": "MCServerTools-Linux-arm64.AppImage",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Linux-arm64.AppImage",
-      "size": 136016449,
-      "sha256": "2b1c52c1c276c9a649c021df5d82bbe2bd26f03b64cf1ccee8d50cee4be0d373"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Linux-arm64.AppImage",
+      "size": 136021075,
+      "sha256": "14a029abf30c19a2dc55a32d3c23208487a91ad4b78cee695d06ab41cc281f02"
     },
     {
       "name": "MCServerTools-Linux-arm64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Linux-arm64.zip",
-      "size": 138129182,
-      "sha256": "3f5477dc8b6cd0f733df4a07388ea58ec6a524c8672b73f6029709f6da6b2be7"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Linux-arm64.zip",
+      "size": 138131246,
+      "sha256": "bc703ba627a2c95d046d63de72dc5bd7dcccb06bd58d4cde596a4845af44b161"
     },
     {
       "name": "MCServerTools-Linux-x64.AppImage",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Linux-x64.AppImage",
-      "size": 136253759,
-      "sha256": "bbfa4caf6a4751ba2b2678fe4d4ecb620e6cbcdbbb7cb1e109ec3ad171cbdc0b"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Linux-x64.AppImage",
+      "size": 136254278,
+      "sha256": "658f2c0efe5eabd3f0da8d716aea98018a78bd5aa227f7ae607a091d117142c9"
     },
     {
       "name": "MCServerTools-Linux-x64.deb",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Linux-x64.deb",
-      "size": 105329940,
-      "sha256": "739865d7ec358aa2f73100329a7aac195ba2ab04d6b9bab8f8c3075de70a31d4"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Linux-x64.deb",
+      "size": 105332128,
+      "sha256": "6ababebbdc27a0297b1f1458b9645124ccee612684a95371a56b70acc22ae936"
     },
     {
       "name": "MCServerTools-Linux-x64.rpm",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Linux-x64.rpm",
-      "size": 91001805,
-      "sha256": "955ba2293d5f3f3f5461a6e8b0f94b3932af0c69ce4617857980fc11b2c2bf10"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Linux-x64.rpm",
+      "size": 91009317,
+      "sha256": "976396632acea9304bd473dd1cc06438bcec180484c089ed270d1ef87f88af57"
     },
     {
       "name": "MCServerTools-Linux-x64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Linux-x64.zip",
-      "size": 137401424,
-      "sha256": "35442ca1dbcd7b4cd2cc740c0dbfa95e72c6407407865c23e14eec1422e24f5a"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Linux-x64.zip",
+      "size": 137403488,
+      "sha256": "55a263d3575c4995d4bf9205b03fa69e3fa1b80c89589ac6b3ddb2f694abc98f"
     },
     {
       "name": "MCServerTools-macOS-arm64.dmg",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-macOS-arm64.dmg",
-      "size": 133147404,
-      "sha256": "cfee1ec1e2278a2f9ed66c005a7b1b30599af6229342560e7e08b0b38ea8d8eb"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-macOS-arm64.dmg",
+      "size": 133155640,
+      "sha256": "9ca583a83081b17eab2dddc385ededf91d62ec0d2c8b4df4e029fcfad9c56571"
     },
     {
       "name": "MCServerTools-macOS-arm64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-macOS-arm64.zip",
-      "size": 221452363,
-      "sha256": "6e488a0c48ca4cf42c3f8c0b96b9d547783315e311bda3d5cc26567628f713be"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-macOS-arm64.zip",
+      "size": 221454489,
+      "sha256": "cfde11fe7c4a5feb7620773f5eb3a4cdc9db44d188c04afe729794e55a33d01e"
     },
     {
       "name": "MCServerTools-macOS-x64.dmg",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-macOS-x64.dmg",
-      "size": 134941836,
-      "sha256": "08cbec6436d5a34996de5cc82758b451392fc7e4869ef1c748c24988e13ee805"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-macOS-x64.dmg",
+      "size": 134937800,
+      "sha256": "65db44ec9fff3096491e639cc3d85e590ce9dd835b5033de8e6c5192762158b5"
     },
     {
       "name": "MCServerTools-macOS-x64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-macOS-x64.zip",
-      "size": 227581286,
-      "sha256": "558179c46103eb9e16c254eabb825a257e0041260167c0bd197326d2d62dd80a"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-macOS-x64.zip",
+      "size": 227583346,
+      "sha256": "a93e9e858193affc4eb284f0b3682706654e41bd803b17e25a4a37bc55b68aa6"
     },
     {
       "name": "MCServerTools-Windows-arm64.exe",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Windows-arm64.exe",
-      "size": 109586267,
-      "sha256": "42b717a8693253b5edd133e67401416fd38b83a26e4fe7ffb0fb00716e71fb69"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Windows-arm64.exe",
+      "size": 109588377,
+      "sha256": "e0498114aa08791a531d57c3f8245ec91299a4f9ce00ecee859b55ef6d956e96"
     },
     {
       "name": "MCServerTools-Windows-arm64.msi",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Windows-arm64.msi",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Windows-arm64.msi",
       "size": 114308203,
-      "sha256": "fa88e5f4eb58d002e12fb274e150c4167073c376b23a60b899a75548da4d967c"
+      "sha256": "5db0fec07fcf4c152ed5cd599c6c3af548e45ca84af7bbf03900ac05c03634d5"
     },
     {
       "name": "MCServerTools-Windows-arm64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Windows-arm64.zip",
-      "size": 156727667,
-      "sha256": "e1d397ed168a05d714be6f616fa3875638beb8dba1d035cf8b864748dfaa6103"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Windows-arm64.zip",
+      "size": 156729638,
+      "sha256": "01142234f6e089dc15b108137f7e1472e9ab82bc27471f41c3c10d33c4f35e84"
     },
     {
       "name": "MCServerTools-Windows-x64.exe",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Windows-x64.exe",
-      "size": 115483277,
-      "sha256": "44f558a9872f9097a3412d962287bec1bf459b1f05b5547bf9f6c72ddd725477"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Windows-x64.exe",
+      "size": 115485537,
+      "sha256": "299d1e565950187a3c6546005d382bc27dfabd415bfbd76ccdbe5897fdfa4f8f"
     },
     {
       "name": "MCServerTools-Windows-x64.msi",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Windows-x64.msi",
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Windows-x64.msi",
       "size": 119645291,
-      "sha256": "1eb5ee4b81575a232d15b6edeb67d6bf6a5afe3cfc4369094621b2f935818c7a"
+      "sha256": "d95d77dc04ee7fda2457b418a7e32c20731d3557d9d4dc090c630dd24c36ad73"
     },
     {
       "name": "MCServerTools-Windows-x64.zip",
-      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.6/MCServerTools-Windows-x64.zip",
-      "size": 158947847,
-      "sha256": "cccbd7e491c111b0e42c2033512ad171b7c39e00016450a29687682d1d2c0dc7"
+      "url": "https://github.com/YSKeLi/MCSTools/releases/download/v1.0.7/MCServerTools-Windows-x64.zip",
+      "size": 158949818,
+      "sha256": "c7ef57dd41ed25cd3e53a07bbfd303161c4590a4b9909086e139445319303fbf"
     }
   ],
   "assetsCount": 16,
   "notes": [
-    "[RemoteServerService.ts (line 2092)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/remote/RemoteServerService.ts#L2092)：新增云服务器一键部署，覆盖环境预检、本地下载、SFTP 上传校验、远程安装、原子提交和失败回滚",
-    "[RemoteServerDetailPage.tsx (line 327)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/renderer/pages/RemoteServerDetailPage.tsx#L327)：新增云服务器部署向导、预检结果、实时进度、任务取消和历史状态展示",
-    "[RemoteServerPage.tsx (line 157)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/renderer/pages/RemoteServerPage.tsx#L157)：新增 SSH 密码与私钥认证切换，支持加密私钥和可选口令",
-    "[deploymentArtifacts.ts (line 160)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/remote/deploymentArtifacts.ts#L160)：支持安全处理 JAR、Forge/NeoForge/Quilt 安装器、ZIP、TAR 和 Bedrock 原生服务端",
-    "[RemoteServerService.ts (line 1808)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/remote/RemoteServerService.ts#L1808)：部署任务持久化，应用异常退出后自动核对远端状态并清理或恢复任务",
-    "[core/index.ts (line 228)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/core/index.ts#L228)：统一服务端核心下载元数据，下载后执行文件大小与 SHA-256 校验，再上传至云服务器",
-    "[FrpPage.tsx (line 6)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/renderer/pages/FrpPage.tsx#L6)：FRP 日志历史与实时日志合并后只保留最近 500 行，修复日志窗口无限增长和重复内容问题",
-    "[archive.ts (line 5)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/frp/archive.ts#L5)：改用应用内 ZIP/TAR 解压能力，修复目标系统缺少 `tar` 命令时 FRP 无法安装的问题",
-    "[serverStorePolicy.ts (line 50)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/serverStorePolicy.ts#L50)：修复生产构建使用 `file://` 页面时旧版根路径核心图标无法显示的问题",
-    "[javaPolicy.ts (line 7)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/server/javaPolicy.ts#L7)：Minecraft 26.x 自动要求 Java 25，修复新版本服务端 Java 版本判断错误",
-    "[deploymentArtifacts.ts (line 130)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/remote/deploymentArtifacts.ts#L130)：旧版 Forge 多 JAR 目录优先选择 `universal.jar`，避免启动到错误文件",
-    "[RemoteServerService.ts (line 85)](https://github.com/YSKeLi/MCSTools/blob/v1.0.6/src/main/remote/RemoteServerService.ts#L85)：为 SFTP 操作和上传停滞增加超时，避免网络异常时部署任务永久挂起"
+    "[PersistentProcessController.ts (line 29)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/runtime/PersistentProcessController.ts#L29)：托管状态记录并核对实际子进程可执行文件，兼容 Windows、Linux 和 macOS 的进程恢复",
+    "[configPolicy.ts (line 1)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/frp/configPolicy.ts#L1)：导入的 FRP 配置通过运行时副本启用持续重连，不修改用户原始配置文件",
+    "[PersistentProcessController.ts (line 202)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/runtime/PersistentProcessController.ts#L202)：修复 Windows 复用旧 PID 后把 `WidgetService.exe` 等其他程序误判为遗留 FRP 进程，导致无法再次启动的问题",
+    "[FrpManager.ts (line 334)](https://github.com/YSKeLi/MCSTools/blob/v1.0.7/src/main/frp/FrpManager.ts#L334)：设置 `loginFailExit = false`，修复 FRP 首次连接超时后直接退出、不再自动重试的问题"
   ]
 }
